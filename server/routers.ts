@@ -453,6 +453,243 @@ const exportRouter = router({
   }),
 });
 
+// ============ RAG ROUTER ============
+const ragRouter = router({
+  // Get RAG configuration for an agent
+  getConfig: protectedProcedure
+    .input(z.object({ agentId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return db.getOrCreateRagConfig(input.agentId);
+    }),
+
+  // Update RAG configuration
+  updateConfig: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      enabled: z.number().optional(),
+      chunkSize: z.number().optional(),
+      chunkOverlap: z.number().optional(),
+      topK: z.number().optional(),
+      similarityThreshold: z.string().optional(),
+      embeddingModel: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { agentId, ...data } = input;
+      return db.updateRagConfig(agentId, data);
+    }),
+
+  // List training documents for an agent
+  listDocuments: protectedProcedure
+    .input(z.object({ agentId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return db.getTrainingDocumentsByAgentId(input.agentId);
+    }),
+
+  // Upload a training document
+  uploadDocument: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      fileName: z.string(),
+      fileType: z.string(),
+      fileSize: z.number().optional(),
+      content: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const document = await db.createTrainingDocument({
+        agentId: input.agentId,
+        userId: ctx.user.id,
+        fileName: input.fileName,
+        fileType: input.fileType,
+        fileSize: input.fileSize,
+        content: input.content,
+        status: "pending",
+        chunkCount: 0,
+      });
+
+      // Trigger async processing (would be implemented with a job queue)
+      // For now, just mark as processing
+      await db.updateTrainingDocument(document.id, { status: "processing" });
+
+      return document;
+    }),
+
+  // Delete a training document
+  deleteDocument: protectedProcedure
+    .input(z.object({ 
+      documentId: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Delete embeddings first
+      await db.deleteVectorEmbeddingsByDocumentId(input.documentId);
+      // Delete document
+      await db.deleteTrainingDocument(input.documentId, ctx.user.id);
+      return { success: true };
+    }),
+
+  // Process document (chunking and embedding generation)
+  processDocument: protectedProcedure
+    .input(z.object({ documentId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      // This would be implemented with actual embedding generation
+      // For now, just update status
+      await db.updateTrainingDocument(input.documentId, { 
+        status: "completed",
+        chunkCount: 10 // placeholder
+      });
+      return { success: true };
+    }),
+});
+
+// ============ UI FLOW ROUTER ============
+const uiFlowRouter = router({
+  // List all flows for current user
+  list: protectedProcedure.query(async ({ ctx }) => {
+    return db.getUiFlowsByUserId(ctx.user.id);
+  }),
+
+  // Get a specific flow with frames and connections
+  get: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const flow = await db.getUiFlowById(input.id, ctx.user.id);
+      if (!flow) return null;
+
+      const frames = await db.getUiFramesByFlowId(input.id);
+      const connections = await db.getUiConnectionsByFlowId(input.id);
+
+      return {
+        ...flow,
+        frames,
+        connections,
+      };
+    }),
+
+  // Create a new flow
+  create: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1).max(255),
+      description: z.string().optional(),
+      agentId: z.number().optional(),
+      mermaidDiagram: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return db.createUiFlow({
+        userId: ctx.user.id,
+        name: input.name,
+        description: input.description,
+        agentId: input.agentId,
+        mermaidDiagram: input.mermaidDiagram,
+      });
+    }),
+
+  // Update a flow
+  update: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      mermaidDiagram: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...data } = input;
+      return db.updateUiFlow(id, ctx.user.id, data);
+    }),
+
+  // Delete a flow
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await db.deleteUiFlow(input.id, ctx.user.id);
+      return { success: true };
+    }),
+
+  // Create a frame
+  createFrame: protectedProcedure
+    .input(z.object({
+      flowId: z.number(),
+      frameId: z.string(),
+      name: z.string(),
+      type: z.string().optional(),
+      positionX: z.number(),
+      positionY: z.number(),
+      width: z.number().optional(),
+      height: z.number().optional(),
+      config: z.record(z.unknown()).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return db.createUiFrame({
+        flowId: input.flowId,
+        frameId: input.frameId,
+        name: input.name,
+        type: input.type || "screen",
+        positionX: input.positionX,
+        positionY: input.positionY,
+        width: input.width || 300,
+        height: input.height || 200,
+        config: input.config || {},
+      });
+    }),
+
+  // Update a frame
+  updateFrame: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      positionX: z.number().optional(),
+      positionY: z.number().optional(),
+      width: z.number().optional(),
+      height: z.number().optional(),
+      name: z.string().optional(),
+      config: z.record(z.unknown()).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...data } = input;
+      return db.updateUiFrame(id, data);
+    }),
+
+  // Delete a frame
+  deleteFrame: protectedProcedure
+    .input(z.object({ 
+      id: z.number(),
+      flowId: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await db.deleteUiFrame(input.id, input.flowId);
+      return { success: true };
+    }),
+
+  // Create a connection
+  createConnection: protectedProcedure
+    .input(z.object({
+      flowId: z.number(),
+      connectionId: z.string(),
+      sourceFrameId: z.string(),
+      targetFrameId: z.string(),
+      label: z.string().optional(),
+      type: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return db.createUiConnection({
+        flowId: input.flowId,
+        connectionId: input.connectionId,
+        sourceFrameId: input.sourceFrameId,
+        targetFrameId: input.targetFrameId,
+        label: input.label,
+        type: input.type || "default",
+      });
+    }),
+
+  // Delete a connection
+  deleteConnection: protectedProcedure
+    .input(z.object({ 
+      id: z.number(),
+      flowId: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await db.deleteUiConnection(input.id, input.flowId);
+      return { success: true };
+    }),
+});
+
 // ============ MAIN ROUTER ============
 export const appRouter = router({
   system: systemRouter,
@@ -470,6 +707,8 @@ export const appRouter = router({
   settings: settingsRouter,
   alerts: alertsRouter,
   export: exportRouter,
+  rag: ragRouter,
+  uiFlow: uiFlowRouter,
 });
 
 export type AppRouter = typeof appRouter;
