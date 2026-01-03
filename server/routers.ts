@@ -8,6 +8,7 @@ import { storagePut } from "./storage";
 import { notifyOwner } from "./_core/notification";
 import { nanoid } from "nanoid";
 import * as db from "./db";
+import { retrieveRelevantContext, buildAugmentedPrompt, processDocumentForRAG } from "./rag";
 
 // ============ AGENT ROUTER ============
 const agentRouter = router({
@@ -168,6 +169,14 @@ const chatRouter = router({
       // Build messages for LLM
       const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
       
+      // Try to retrieve relevant context from RAG
+      let augmentedMessage = input.message;
+      const ragContext = await retrieveRelevantContext(input.agentId, input.message);
+      if (ragContext) {
+        // Augment the user message with retrieved context
+        augmentedMessage = buildAugmentedPrompt(input.message, ragContext);
+      }
+      
       if (agent.systemPrompt) {
         messages.push({ role: "system", content: agent.systemPrompt });
       }
@@ -178,6 +187,13 @@ const chatRouter = router({
         if (msg.role === "user" || msg.role === "assistant") {
           messages.push({ role: msg.role as "user" | "assistant", content: msg.content });
         }
+      }
+      
+      // Replace the last user message with the augmented version if RAG was used
+      if (ragContext && messages.length > 0 && messages[messages.length - 1]?.role === "user") {
+        messages[messages.length - 1] = { role: "user", content: augmentedMessage };
+      } else if (ragContext) {
+        messages.push({ role: "user", content: augmentedMessage });
       }
 
       // Call LLM
@@ -506,9 +522,12 @@ const ragRouter = router({
         chunkCount: 0,
       });
 
-      // Trigger async processing (would be implemented with a job queue)
-      // For now, just mark as processing
-      await db.updateTrainingDocument(document.id, { status: "processing" });
+      // Process document immediately (in production, this would be queued)
+      try {
+        await processDocumentForRAG(document.id, input.agentId, input.content);
+      } catch (error) {
+        console.error("Error processing document:", error);
+      }
 
       return document;
     }),
@@ -528,14 +547,13 @@ const ragRouter = router({
 
   // Process document (chunking and embedding generation)
   processDocument: protectedProcedure
-    .input(z.object({ documentId: z.number() }))
+    .input(z.object({ 
+      documentId: z.number(),
+      agentId: z.number(),
+      content: z.string(),
+    }))
     .mutation(async ({ ctx, input }) => {
-      // This would be implemented with actual embedding generation
-      // For now, just update status
-      await db.updateTrainingDocument(input.documentId, { 
-        status: "completed",
-        chunkCount: 10 // placeholder
-      });
+      await processDocumentForRAG(input.documentId, input.agentId, input.content);
       return { success: true };
     }),
 });
