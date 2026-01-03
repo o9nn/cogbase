@@ -25,10 +25,24 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * Simple text embedding using character frequencies (placeholder)
- * In production, this would use OpenAI's embedding API
+ * Simple text embedding using character frequencies
+ * 
+ * ⚠️ WARNING: THIS IS A DEVELOPMENT PLACEHOLDER ONLY ⚠️
+ * 
+ * This implementation is NOT suitable for production use. It creates embeddings
+ * based on character frequencies which will not produce meaningful semantic
+ * similarity results.
+ * 
+ * For production, replace this with OpenAI's embedding API:
+ * - Use `text-embedding-ada-002` or `text-embedding-3-small`
+ * - Call OpenAI API: `POST https://api.openai.com/v1/embeddings`
+ * - Store the returned 1536-dimensional vector
+ * 
+ * @deprecated Replace with proper embedding API before production deployment
  */
 function createSimpleEmbedding(text: string): number[] {
+  console.warn("[RAG] WARNING: Using placeholder embedding function. Replace with OpenAI API for production!");
+  
   const embedding = new Array(128).fill(0);
   const normalized = text.toLowerCase();
   
@@ -116,12 +130,14 @@ export function chunkText(text: string, chunkSize: number = 512, overlap: number
     chunks.push(chunk);
     
     // Move start position with overlap
-    start = end - overlap;
+    const nextStart = end - overlap;
     
-    // Avoid infinite loop if overlap is too large
-    if (start <= 0 && end < text.length) {
-      start = end;
+    // Avoid infinite loop if overlap is too large or we've reached the end
+    if (nextStart <= start || end >= text.length) {
+      break;
     }
+    
+    start = nextStart;
   }
   
   return chunks;

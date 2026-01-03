@@ -67,9 +67,11 @@ export function RagTraining({ agentId }: RagTrainingProps) {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Check file type
+    // Check file type - use a whitelist approach for security
     const allowedTypes = ['text/plain', 'text/markdown', 'application/pdf', 'text/csv'];
-    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(txt|md|pdf|csv)$/i)) {
+    const allowedExtensions = /\.(txt|md|pdf|csv)$/i;
+    
+    if (!allowedTypes.includes(file.type) && !file.name.match(allowedExtensions)) {
       toast.error("Unsupported file type. Please upload .txt, .md, .pdf, or .csv files.");
       return;
     }
@@ -80,6 +82,9 @@ export function RagTraining({ agentId }: RagTrainingProps) {
       return;
     }
 
+    // Note: Server-side validation should also verify file content
+    // Client-side checks are for UX only and can be bypassed
+    
     // Read file content
     const reader = new FileReader();
     reader.onload = async (e) => {

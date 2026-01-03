@@ -166,35 +166,31 @@ const chatRouter = router({
       // Get conversation history
       const history = await db.getMessagesBySessionId(sessionId);
       
+      // Try to retrieve relevant context from RAG
+      const ragContext = await retrieveRelevantContext(input.agentId, input.message);
+      
       // Build messages for LLM
       const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
       
-      // Try to retrieve relevant context from RAG
-      let augmentedMessage = input.message;
-      const ragContext = await retrieveRelevantContext(input.agentId, input.message);
-      if (ragContext) {
-        // Augment the user message with retrieved context
-        augmentedMessage = buildAugmentedPrompt(input.message, ragContext);
-      }
-      
+      // Add system prompt
       if (agent.systemPrompt) {
         messages.push({ role: "system", content: agent.systemPrompt });
       }
 
-      // Add conversation history (last 10 messages)
-      const recentHistory = history.slice(-10);
+      // Add conversation history (last 10 messages) - excluding the current message
+      const recentHistory = history.slice(0, -1).slice(-10);
       for (const msg of recentHistory) {
         if (msg.role === "user" || msg.role === "assistant") {
           messages.push({ role: msg.role as "user" | "assistant", content: msg.content });
         }
       }
       
-      // Replace the last user message with the augmented version if RAG was used
-      if (ragContext && messages.length > 0 && messages[messages.length - 1]?.role === "user") {
-        messages[messages.length - 1] = { role: "user", content: augmentedMessage };
-      } else if (ragContext) {
-        messages.push({ role: "user", content: augmentedMessage });
-      }
+      // Add the current user message (augmented with RAG context if available)
+      const userMessage = ragContext 
+        ? buildAugmentedPrompt(input.message, ragContext)
+        : input.message;
+      
+      messages.push({ role: "user", content: userMessage });
 
       // Call LLM
       const startTime = Date.now();
@@ -511,6 +507,20 @@ const ragRouter = router({
       content: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
+      // Validate file type and content on server side for security
+      const allowedTypes = ['text/plain', 'text/markdown', 'application/pdf', 'text/csv'];
+      const allowedExtensions = /\.(txt|md|pdf|csv)$/i;
+      
+      if (!allowedTypes.includes(input.fileType) && !input.fileName.match(allowedExtensions)) {
+        throw new Error("Invalid file type. Only .txt, .md, .pdf, and .csv files are allowed.");
+      }
+      
+      // Validate content size (10MB limit)
+      const contentSizeBytes = Buffer.byteLength(input.content, 'utf8');
+      if (contentSizeBytes > 10 * 1024 * 1024) {
+        throw new Error("File content exceeds 10MB limit");
+      }
+      
       const document = await db.createTrainingDocument({
         agentId: input.agentId,
         userId: ctx.user.id,
