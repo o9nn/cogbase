@@ -33,7 +33,8 @@ import {
   Settings, 
   Bell,
   Zap,
-  ChevronRight
+  ChevronRight,
+  Layers
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "wouter";
@@ -45,6 +46,7 @@ import { trpc } from "@/lib/trpc";
 const mainMenuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
   { icon: Bot, label: "Agents", path: "/agents" },
+  { icon: Layers, label: "UI Flows", path: "/ui-flows" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];
 

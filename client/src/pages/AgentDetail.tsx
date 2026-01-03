@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { RagTraining } from "@/components/RagTraining";
 
 export default function AgentDetail() {
   const params = useParams<{ id: string }>();
@@ -169,6 +170,7 @@ export default function AgentDetail() {
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="model">Model Settings</TabsTrigger>
           <TabsTrigger value="starters">Conversation Starters</TabsTrigger>
+          <TabsTrigger value="rag">RAG Training</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
@@ -332,6 +334,10 @@ export default function AgentDetail() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="rag" className="space-y-4">
+          <RagTraining agentId={agentId} />
         </TabsContent>
       </Tabs>
 
