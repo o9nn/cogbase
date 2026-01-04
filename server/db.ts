@@ -8,7 +8,13 @@ import {
   accountSettings, InsertAccountSettings, AccountSettings,
   analyticsEvents, InsertAnalyticsEvent,
   exportedFiles, InsertExportedFile,
-  alerts, InsertAlert, Alert
+  alerts, InsertAlert, Alert,
+  trainingDocuments, InsertTrainingDocument, TrainingDocument,
+  ragConfigurations, InsertRagConfiguration, RagConfiguration,
+  vectorEmbeddings, InsertVectorEmbedding, VectorEmbedding,
+  uiFlows, InsertUiFlow, UiFlow,
+  uiFrames, InsertUiFrame, UiFrame,
+  uiConnections, InsertUiConnection, UiConnection
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { nanoid } from 'nanoid';
@@ -532,4 +538,267 @@ export async function checkRetrainingAlert(userId: number): Promise<void> {
       }
     }
   }
+}
+
+// ============ RAG TRAINING DOCUMENTS ============
+
+export async function createTrainingDocument(document: InsertTrainingDocument): Promise<TrainingDocument> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  const result = await db.insert(trainingDocuments).values(document);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(trainingDocuments).where(eq(trainingDocuments.id, insertedId));
+  return inserted[0]!;
+}
+
+export async function getTrainingDocumentsByAgentId(agentId: number): Promise<TrainingDocument[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(trainingDocuments)
+    .where(eq(trainingDocuments.agentId, agentId))
+    .orderBy(desc(trainingDocuments.createdAt));
+}
+
+export async function updateTrainingDocument(id: number, data: Partial<InsertTrainingDocument>): Promise<TrainingDocument | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  await db.update(trainingDocuments).set(data).where(eq(trainingDocuments.id, id));
+  const updated = await db.select().from(trainingDocuments).where(eq(trainingDocuments.id, id));
+  return updated[0];
+}
+
+export async function deleteTrainingDocument(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.delete(trainingDocuments).where(
+    and(
+      eq(trainingDocuments.id, id),
+      eq(trainingDocuments.userId, userId)
+    )
+  );
+}
+
+// ============ RAG CONFIGURATIONS ============
+
+export async function getOrCreateRagConfig(agentId: number): Promise<RagConfiguration> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  const existing = await db.select()
+    .from(ragConfigurations)
+    .where(eq(ragConfigurations.agentId, agentId));
+
+  if (existing.length > 0) {
+    return existing[0]!;
+  }
+
+  const result = await db.insert(ragConfigurations).values({
+    agentId,
+    enabled: 1,
+    chunkSize: 512,
+    chunkOverlap: 50,
+    topK: 3,
+    similarityThreshold: "0.7",
+    embeddingModel: "text-embedding-ada-002",
+  });
+
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(ragConfigurations).where(eq(ragConfigurations.id, insertedId));
+  return inserted[0]!;
+}
+
+export async function updateRagConfig(agentId: number, data: Partial<InsertRagConfiguration>): Promise<RagConfiguration | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  await db.update(ragConfigurations).set(data).where(eq(ragConfigurations.agentId, agentId));
+  const updated = await db.select().from(ragConfigurations).where(eq(ragConfigurations.agentId, agentId));
+  return updated[0];
+}
+
+// ============ VECTOR EMBEDDINGS ============
+
+export async function createVectorEmbedding(embedding: InsertVectorEmbedding): Promise<VectorEmbedding> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  const result = await db.insert(vectorEmbeddings).values(embedding);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(vectorEmbeddings).where(eq(vectorEmbeddings.id, insertedId));
+  return inserted[0]!;
+}
+
+export async function getVectorEmbeddingsByAgentId(agentId: number): Promise<VectorEmbedding[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(vectorEmbeddings)
+    .where(eq(vectorEmbeddings.agentId, agentId))
+    .orderBy(desc(vectorEmbeddings.createdAt));
+}
+
+export async function deleteVectorEmbeddingsByDocumentId(documentId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.delete(vectorEmbeddings).where(eq(vectorEmbeddings.documentId, documentId));
+}
+
+// ============ UI FLOWS ============
+
+export async function createUiFlow(flow: InsertUiFlow): Promise<UiFlow> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  const result = await db.insert(uiFlows).values(flow);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(uiFlows).where(eq(uiFlows.id, insertedId));
+  return inserted[0]!;
+}
+
+export async function getUiFlowsByUserId(userId: number): Promise<UiFlow[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(uiFlows)
+    .where(eq(uiFlows.userId, userId))
+    .orderBy(desc(uiFlows.updatedAt));
+}
+
+export async function getUiFlowById(id: number, userId: number): Promise<UiFlow | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const flows = await db.select()
+    .from(uiFlows)
+    .where(and(
+      eq(uiFlows.id, id),
+      eq(uiFlows.userId, userId)
+    ));
+
+  return flows[0];
+}
+
+export async function updateUiFlow(id: number, userId: number, data: Partial<InsertUiFlow>): Promise<UiFlow | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  await db.update(uiFlows).set(data).where(
+    and(
+      eq(uiFlows.id, id),
+      eq(uiFlows.userId, userId)
+    )
+  );
+
+  return getUiFlowById(id, userId);
+}
+
+export async function deleteUiFlow(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  // Delete associated frames and connections
+  await db.delete(uiFrames).where(eq(uiFrames.flowId, id));
+  await db.delete(uiConnections).where(eq(uiConnections.flowId, id));
+  
+  await db.delete(uiFlows).where(
+    and(
+      eq(uiFlows.id, id),
+      eq(uiFlows.userId, userId)
+    )
+  );
+}
+
+// ============ UI FRAMES ============
+
+export async function createUiFrame(frame: InsertUiFrame): Promise<UiFrame> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  const result = await db.insert(uiFrames).values(frame);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(uiFrames).where(eq(uiFrames.id, insertedId));
+  return inserted[0]!;
+}
+
+export async function getUiFramesByFlowId(flowId: number): Promise<UiFrame[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(uiFrames)
+    .where(eq(uiFrames.flowId, flowId));
+}
+
+export async function updateUiFrame(id: number, data: Partial<InsertUiFrame>): Promise<UiFrame | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  await db.update(uiFrames).set(data).where(eq(uiFrames.id, id));
+  const updated = await db.select().from(uiFrames).where(eq(uiFrames.id, id));
+  return updated[0];
+}
+
+export async function deleteUiFrame(id: number, flowId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.delete(uiFrames).where(
+    and(
+      eq(uiFrames.id, id),
+      eq(uiFrames.flowId, flowId)
+    )
+  );
+}
+
+// ============ UI CONNECTIONS ============
+
+export async function createUiConnection(connection: InsertUiConnection): Promise<UiConnection> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  const result = await db.insert(uiConnections).values(connection);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(uiConnections).where(eq(uiConnections.id, insertedId));
+  return inserted[0]!;
+}
+
+export async function getUiConnectionsByFlowId(flowId: number): Promise<UiConnection[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(uiConnections)
+    .where(eq(uiConnections.flowId, flowId));
+}
+
+export async function deleteUiConnection(id: number, flowId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.delete(uiConnections).where(
+    and(
+      eq(uiConnections.id, id),
+      eq(uiConnections.flowId, flowId)
+    )
+  );
 }
