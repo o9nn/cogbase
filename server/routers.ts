@@ -642,7 +642,7 @@ const uiFlowRouter = router({
       positionY: z.number(),
       width: z.number().optional(),
       height: z.number().optional(),
-      config: z.record(z.unknown()).optional(),
+      config: z.record(z.string(), z.unknown()).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       return db.createUiFrame({
@@ -667,7 +667,7 @@ const uiFlowRouter = router({
       width: z.number().optional(),
       height: z.number().optional(),
       name: z.string().optional(),
-      config: z.record(z.unknown()).optional(),
+      config: z.record(z.string(), z.unknown()).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
