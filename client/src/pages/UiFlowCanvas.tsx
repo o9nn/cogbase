@@ -291,7 +291,11 @@ export default function UiFlowCanvas() {
   };
 
   const sanitizeFilename = (name: string) =>
-    name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "ui-flow";
+    name
+      .replace(/\s+/g, "-")
+      .replace(/[^a-zA-Z0-9-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "") || "ui-flow";
 
   const downloadTextFile = (content: string, fileName: string, mimeType: string) => {
     const blob = new Blob([content], { type: mimeType });
@@ -305,12 +309,37 @@ export default function UiFlowCanvas() {
     URL.revokeObjectURL(url);
   };
 
-  const formatYamlScalar = (value: unknown) => {
-    if (typeof value === "string") return JSON.stringify(value);
+  const formatYamlString = (value: string, indent: number) => {
+    if (value.length === 0) return "''";
+    if (value.includes("\n")) {
+      const blockIndent = " ".repeat(indent + 2);
+      const lines = value.split("\n").map((line) => `${blockIndent}${line}`).join("\n");
+      return `|-\n${lines}`;
+    }
+
+    const plainSafe = /^[a-zA-Z0-9 _.-]+$/.test(value);
+    const reserved = /^(true|false|null|~|yes|no|on|off|nan|\.nan|inf|\.inf|-\.inf|\+\.inf)$/i.test(value);
+    const numericLike =
+      /^[-+]?((\d+(\.\d*)?)|(\.\d+))(e[-+]?\d+)?$/i.test(value) ||
+      /^0[xob][0-9a-f]+$/i.test(value);
+    const hasBoundaryWhitespace = value.trim() !== value;
+
+    if (plainSafe && !reserved && !numericLike && !hasBoundaryWhitespace && !value.endsWith(":")) {
+      return value;
+    }
+
+    return `'${value.replace(/'/g, "''")}'`;
+  };
+
+  const formatYamlScalar = (value: unknown, indent: number) => {
+    if (typeof value === "string") return formatYamlString(value, indent);
     if (typeof value === "number" || typeof value === "boolean") return String(value);
     if (value === null || value === undefined) return "null";
     return JSON.stringify(value);
   };
+
+  const formatYamlKey = (key: string) =>
+    /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(key) ? key : `'${key.replace(/'/g, "''")}'`;
 
   const toYaml = (value: unknown, indent = 0): string => {
     const spaces = " ".repeat(indent);
@@ -321,7 +350,7 @@ export default function UiFlowCanvas() {
           if (item !== null && typeof item === "object") {
             return `${spaces}-\n${toYaml(item, indent + 2)}`;
           }
-          return `${spaces}- ${formatYamlScalar(item)}`;
+          return `${spaces}- ${formatYamlScalar(item, indent)}`;
         })
         .join("\n");
     }
@@ -331,15 +360,16 @@ export default function UiFlowCanvas() {
       if (entries.length === 0) return `${spaces}{}`;
       return entries
         .map(([key, val]) => {
+          const yamlKey = formatYamlKey(key);
           if (val !== null && typeof val === "object") {
-            return `${spaces}${key}:\n${toYaml(val, indent + 2)}`;
+            return `${spaces}${yamlKey}:\n${toYaml(val, indent + 2)}`;
           }
-          return `${spaces}${key}: ${formatYamlScalar(val)}`;
+          return `${spaces}${yamlKey}: ${formatYamlScalar(val, indent)}`;
         })
         .join("\n");
     }
 
-    return `${spaces}${formatYamlScalar(value)}`;
+    return `${spaces}${formatYamlScalar(value, indent)}`;
   };
 
   const exportFlow = (format: "json" | "yaml") => {
