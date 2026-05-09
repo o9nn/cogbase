@@ -17,6 +17,12 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Frame {
   id: string;
@@ -33,6 +39,18 @@ interface Connection {
   sourceId: string;
   targetId: string;
   label?: string;
+}
+
+interface FlowExportData {
+  flow: {
+    id: number;
+    name: string;
+    description: string | null;
+    mermaidDiagram: string;
+    exportedAt: string;
+  };
+  frames: Frame[];
+  connections: Connection[];
 }
 
 export default function UiFlowCanvas() {
@@ -272,9 +290,116 @@ export default function UiFlowCanvas() {
     });
   };
 
-  const exportAsImage = () => {
-    // This would require a library like html2canvas
-    toast.info("Export feature coming soon");
+  const sanitizeFilename = (name: string) =>
+    name
+      .replace(/\s+/g, "-")
+      .replace(/[^a-zA-Z0-9-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "") || "ui-flow";
+
+  const downloadTextFile = (content: string, fileName: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const formatYamlString = (value: string, indent: number) => {
+    if (value.length === 0) return "''";
+    if (value.includes("\n")) {
+      const blockIndent = " ".repeat(indent + 2);
+      const lines = value.split("\n").map((line) => `${blockIndent}${line}`).join("\n");
+      return `|-\n${lines}`;
+    }
+
+    const plainSafe = /^[a-zA-Z0-9 _.-]+$/.test(value);
+    const reserved = /^(true|false|null|~|yes|no|on|off|nan|\.nan|inf|\.inf|-\.inf|\+\.inf)$/i.test(value);
+    const numericLike =
+      /^[-+]?((\d+(\.\d*)?)|(\.\d+))(e[-+]?\d+)?$/i.test(value) ||
+      /^0[xob][0-9a-f]+$/i.test(value);
+    const hasBoundaryWhitespace = value.trim() !== value;
+
+    if (plainSafe && !reserved && !numericLike && !hasBoundaryWhitespace && !value.endsWith(":")) {
+      return value;
+    }
+
+    return `'${value.replace(/'/g, "''")}'`;
+  };
+
+  const formatYamlScalar = (value: unknown, indent: number) => {
+    if (typeof value === "string") return formatYamlString(value, indent);
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (value === null || value === undefined) return "null";
+    return JSON.stringify(value);
+  };
+
+  const formatYamlKey = (key: string) =>
+    /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(key) ? key : `'${key.replace(/'/g, "''")}'`;
+
+  const toYaml = (value: unknown, indent = 0): string => {
+    const spaces = " ".repeat(indent);
+    if (Array.isArray(value)) {
+      if (value.length === 0) return `${spaces}[]`;
+      return value
+        .map((item) => {
+          if (item !== null && typeof item === "object") {
+            return `${spaces}-\n${toYaml(item, indent + 2)}`;
+          }
+          return `${spaces}- ${formatYamlScalar(item, indent)}`;
+        })
+        .join("\n");
+    }
+
+    if (value !== null && typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>);
+      if (entries.length === 0) return `${spaces}{}`;
+      return entries
+        .map(([key, val]) => {
+          const yamlKey = formatYamlKey(key);
+          if (val !== null && typeof val === "object") {
+            return `${spaces}${yamlKey}:\n${toYaml(val, indent + 2)}`;
+          }
+          return `${spaces}${yamlKey}: ${formatYamlScalar(val, indent)}`;
+        })
+        .join("\n");
+    }
+
+    return `${spaces}${formatYamlScalar(value, indent)}`;
+  };
+
+  const exportFlow = (format: "json" | "yaml") => {
+    if (!flow) return;
+
+    const exportData: FlowExportData = {
+      flow: {
+        id: flow.id,
+        name: flow.name,
+        description: flow.description || null,
+        mermaidDiagram: mermaidCode || flow.mermaidDiagram || "",
+        exportedAt: new Date().toISOString(),
+      },
+      frames,
+      connections,
+    };
+
+    const baseName = `${sanitizeFilename(flow.name)}-${flow.id}`;
+    if (format === "json") {
+      downloadTextFile(
+        `${JSON.stringify(exportData, null, 2)}\n`,
+        `${baseName}.json`,
+        "application/json"
+      );
+      toast.success("Flow exported as JSON");
+      return;
+    }
+
+    downloadTextFile(`${toYaml(exportData)}\n`, `${baseName}.yaml`, "text/yaml");
+    toast.success("Flow exported as YAML");
   };
 
   if (isLoading) {
@@ -366,10 +491,22 @@ export default function UiFlowCanvas() {
             <Plus className="w-4 h-4 mr-2" />
             Add Frame
           </Button>
-          <Button size="sm" variant="outline" onClick={exportAsImage}>
-            <Download className="w-4 h-4 mr-2" />
-            Export
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline">
+                <Download className="w-4 h-4 mr-2" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => exportFlow("json")}>
+                Export JSON
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportFlow("yaml")}>
+                Export YAML
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
