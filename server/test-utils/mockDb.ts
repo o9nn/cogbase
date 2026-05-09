@@ -397,11 +397,11 @@ export async function createChatMessage(
   const message = {
     id: nextId("chatMessage"),
     createdAt: new Date(),
-    signalScore: null,
-    aiRequests: null,
-    tokensUsed: null,
-    latencyMs: null,
     ...data,
+    signalScore: data.signalScore ?? null,
+    aiRequests: data.aiRequests ?? null,
+    tokensUsed: data.tokensUsed ?? null,
+    latencyMs: data.latencyMs ?? null,
   };
   state.chatMessages.push(message);
   return message;
