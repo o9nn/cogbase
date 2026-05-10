@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
+vi.mock("./db", async () => import("./test-utils/mockDb"));
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
+import { resetMockDb } from "./test-utils/mockDb";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
 
@@ -41,6 +43,10 @@ function createUnauthContext(): TrpcContext {
     } as unknown as TrpcContext["res"],
   };
 }
+
+beforeEach(() => {
+  resetMockDb();
+});
 
 describe("agent router", () => {
   describe("agent.list", () => {
