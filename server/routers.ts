@@ -508,11 +508,18 @@ const ragRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       // Validate file type and content on server side for security
-      const allowedTypes = ['text/plain', 'text/markdown', 'application/pdf', 'text/csv'];
-      const allowedExtensions = /\.(txt|md|pdf|csv)$/i;
+      const allowedTypes = [
+        'text/plain',
+        'text/markdown',
+        'application/pdf',
+        'text/csv',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ];
+      const allowedExtensions = /\.(txt|md|pdf|csv|docx|xlsx)$/i;
       
       if (!allowedTypes.includes(input.fileType) && !input.fileName.match(allowedExtensions)) {
-        throw new Error("Invalid file type. Only .txt, .md, .pdf, and .csv files are allowed.");
+        throw new Error("Invalid file type. Only .txt, .md, .pdf, .csv, .docx, and .xlsx files are allowed.");
       }
       
       // Validate content size (10MB limit)

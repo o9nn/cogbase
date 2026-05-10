@@ -147,6 +147,60 @@ describe("RAG router", () => {
         })
       ).rejects.toThrow();
     });
+
+    it("accepts DOCX and XLSX files", async () => {
+      const ctx = createAuthContext();
+      const caller = appRouter.createCaller(ctx);
+
+      const docxResult = await caller.rag.uploadDocument({
+        agentId: 1,
+        fileName: "knowledge-base.docx",
+        fileType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        fileSize: 1024,
+        content: "DOCX test content",
+      });
+
+      const xlsxResult = await caller.rag.uploadDocument({
+        agentId: 1,
+        fileName: "faq-data.xlsx",
+        fileType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        fileSize: 1024,
+        content: "XLSX test content",
+      });
+
+      expect(docxResult.fileName).toBe("knowledge-base.docx");
+      expect(xlsxResult.fileName).toBe("faq-data.xlsx");
+    });
+
+    it("accepts DOCX/XLSX by extension even with generic mime type", async () => {
+      const ctx = createAuthContext();
+      const caller = appRouter.createCaller(ctx);
+
+      const result = await caller.rag.uploadDocument({
+        agentId: 1,
+        fileName: "uploaded.docx",
+        fileType: "application/octet-stream",
+        fileSize: 1024,
+        content: "Generic mime upload content",
+      });
+
+      expect(result.fileName).toBe("uploaded.docx");
+    });
+
+    it("rejects unsupported file types", async () => {
+      const ctx = createAuthContext();
+      const caller = appRouter.createCaller(ctx);
+
+      await expect(
+        caller.rag.uploadDocument({
+          agentId: 1,
+          fileName: "malware.exe",
+          fileType: "application/x-msdownload",
+          fileSize: 1024,
+          content: "binary-content",
+        })
+      ).rejects.toThrow("Invalid file type");
+    });
   });
 
   describe("rag.deleteDocument", () => {
