@@ -68,11 +68,18 @@ export function RagTraining({ agentId }: RagTrainingProps) {
     if (!file) return;
 
     // Check file type - use a whitelist approach for security
-    const allowedTypes = ['text/plain', 'text/markdown', 'application/pdf', 'text/csv'];
-    const allowedExtensions = /\.(txt|md|pdf|csv)$/i;
+    const allowedTypes = [
+      'text/plain',
+      'text/markdown',
+      'application/pdf',
+      'text/csv',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ];
+    const allowedExtensions = /\.(txt|md|pdf|csv|docx|xlsx)$/i;
     
     if (!allowedTypes.includes(file.type) && !file.name.match(allowedExtensions)) {
-      toast.error("Unsupported file type. Please upload .txt, .md, .pdf, or .csv files.");
+      toast.error("Unsupported file type. Please upload .txt, .md, .pdf, .csv, .docx, or .xlsx files.");
       return;
     }
 
@@ -238,7 +245,7 @@ export function RagTraining({ agentId }: RagTrainingProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".txt,.md,.pdf,.csv"
+            accept=".txt,.md,.pdf,.csv,.docx,.xlsx"
             onChange={handleFileUpload}
             className="hidden"
           />

@@ -341,7 +341,7 @@ npm run check
 ## Future Enhancements
 
 ### RAG System
-- [ ] Support for more document formats (DOCX, XLSX)
+- [x] Support for more document formats (DOCX, XLSX)
 - [ ] Advanced chunking strategies (semantic, recursive)
 - [ ] Multiple embedding models support
 - [ ] Vector database integration (Pinecone, Weaviate)
