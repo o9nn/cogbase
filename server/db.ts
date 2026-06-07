@@ -14,10 +14,20 @@ import {
   vectorEmbeddings, InsertVectorEmbedding, VectorEmbedding,
   uiFlows, InsertUiFlow, UiFlow,
   uiFrames, InsertUiFrame, UiFrame,
-  uiConnections, InsertUiConnection, UiConnection
+  uiConnections, InsertUiConnection, UiConnection,
+  agentVersions, InsertAgentVersion, AgentVersion,
+  conversationFeedback, InsertConversationFeedback, ConversationFeedback,
+  auditLogs, InsertAuditLog, AuditLog,
+  webhooks, InsertWebhook, Webhook,
+  apiUsage, InsertApiUsage, ApiUsage,
+  flowTemplates, InsertFlowTemplate, FlowTemplate,
+  frameTemplates, InsertFrameTemplate, FrameTemplate,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { nanoid } from 'nanoid';
+
+// Re-export types for use in other modules
+export type { RagConfiguration };
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -801,4 +811,289 @@ export async function deleteUiConnection(id: number, flowId: number): Promise<vo
       eq(uiConnections.flowId, flowId)
     )
   );
+}
+
+// ============ CONVERSATION FEEDBACK ============
+
+export async function createConversationFeedback(
+  data: Omit<InsertConversationFeedback, 'id' | 'createdAt'>
+): Promise<ConversationFeedback> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(conversationFeedback).values(data);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(conversationFeedback).where(eq(conversationFeedback.id, insertedId));
+  return inserted[0]!;
+}
+
+export async function getFeedbackByAgentId(
+  agentId: number,
+  startDate?: Date,
+  endDate?: Date
+): Promise<ConversationFeedback[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  let conditions = [eq(conversationFeedback.agentId, agentId)];
+  
+  if (startDate) {
+    conditions.push(gte(conversationFeedback.createdAt, startDate));
+  }
+  if (endDate) {
+    conditions.push(lte(conversationFeedback.createdAt, endDate));
+  }
+
+  return db.select()
+    .from(conversationFeedback)
+    .where(and(...conditions))
+    .orderBy(desc(conversationFeedback.createdAt));
+}
+
+export async function getFeedbackStats(agentId: number): Promise<{
+  totalFeedback: number;
+  thumbsUp: number;
+  thumbsDown: number;
+  averageRating: number | null;
+}> {
+  const db = await getDb();
+  if (!db) return { totalFeedback: 0, thumbsUp: 0, thumbsDown: 0, averageRating: null };
+
+  const feedback = await db.select()
+    .from(conversationFeedback)
+    .where(eq(conversationFeedback.agentId, agentId));
+
+  const thumbsUp = feedback.filter(f => f.feedbackType === 'thumbs_up').length;
+  const thumbsDown = feedback.filter(f => f.feedbackType === 'thumbs_down').length;
+  const ratings = feedback.filter(f => f.rating != null).map(f => f.rating!);
+  const averageRating = ratings.length > 0 
+    ? ratings.reduce((a, b) => a + b, 0) / ratings.length 
+    : null;
+
+  return {
+    totalFeedback: feedback.length,
+    thumbsUp,
+    thumbsDown,
+    averageRating,
+  };
+}
+
+// ============ AGENT VERSIONS ============
+
+export async function createAgentVersion(
+  data: Omit<InsertAgentVersion, 'id' | 'createdAt'>
+): Promise<AgentVersion> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(agentVersions).values(data);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(agentVersions).where(eq(agentVersions.id, insertedId));
+  return inserted[0]!;
+}
+
+export async function getAgentVersions(agentId: number): Promise<AgentVersion[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(agentVersions)
+    .where(eq(agentVersions.agentId, agentId))
+    .orderBy(desc(agentVersions.version));
+}
+
+export async function getAgentVersion(agentId: number, version: number): Promise<AgentVersion | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const results = await db.select()
+    .from(agentVersions)
+    .where(and(
+      eq(agentVersions.agentId, agentId),
+      eq(agentVersions.version, version)
+    ))
+    .limit(1);
+
+  return results[0];
+}
+
+export async function getLatestAgentVersion(agentId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+
+  const result = await db.select()
+    .from(agentVersions)
+    .where(eq(agentVersions.agentId, agentId))
+    .orderBy(desc(agentVersions.version))
+    .limit(1);
+
+  return result[0]?.version || 0;
+}
+
+// ============ AUDIT LOGS ============
+
+export async function createAuditLog(
+  data: Omit<InsertAuditLog, 'id' | 'createdAt'>
+): Promise<AuditLog> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(auditLogs).values(data);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(auditLogs).where(eq(auditLogs.id, insertedId));
+  return inserted[0]!;
+}
+
+export async function getAuditLogs(
+  userId?: number,
+  startDate?: Date,
+  endDate?: Date,
+  limit: number = 100
+): Promise<AuditLog[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  let conditions = [];
+  
+  if (userId) {
+    conditions.push(eq(auditLogs.userId, userId));
+  }
+  if (startDate) {
+    conditions.push(gte(auditLogs.createdAt, startDate));
+  }
+  if (endDate) {
+    conditions.push(lte(auditLogs.createdAt, endDate));
+  }
+
+  const query = db.select()
+    .from(auditLogs)
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(limit);
+
+  if (conditions.length > 0) {
+    return query.where(and(...conditions));
+  }
+
+  return query;
+}
+
+// ============ FLOW TEMPLATES ============
+
+export async function getFlowTemplates(category?: string): Promise<FlowTemplate[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  if (category) {
+    return db.select()
+      .from(flowTemplates)
+      .where(and(
+        eq(flowTemplates.isPublic, 1),
+        eq(flowTemplates.category, category)
+      ))
+      .orderBy(desc(flowTemplates.usageCount));
+  }
+
+  return db.select()
+    .from(flowTemplates)
+    .where(eq(flowTemplates.isPublic, 1))
+    .orderBy(desc(flowTemplates.usageCount));
+}
+
+export async function getFlowTemplate(id: number): Promise<FlowTemplate | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const results = await db.select()
+    .from(flowTemplates)
+    .where(eq(flowTemplates.id, id))
+    .limit(1);
+
+  return results[0];
+}
+
+export async function incrementFlowTemplateUsage(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.update(flowTemplates)
+    .set({ usageCount: sql`${flowTemplates.usageCount} + 1` })
+    .where(eq(flowTemplates.id, id));
+}
+
+// ============ FRAME TEMPLATES ============
+
+export async function getFrameTemplates(category?: string, type?: string): Promise<FrameTemplate[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  let conditions = [eq(frameTemplates.isPublic, 1)];
+  
+  if (category) {
+    conditions.push(eq(frameTemplates.category, category));
+  }
+  if (type) {
+    conditions.push(eq(frameTemplates.type, type));
+  }
+
+  return db.select()
+    .from(frameTemplates)
+    .where(and(...conditions))
+    .orderBy(desc(frameTemplates.usageCount));
+}
+
+export async function getFrameTemplate(id: number): Promise<FrameTemplate | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const results = await db.select()
+    .from(frameTemplates)
+    .where(eq(frameTemplates.id, id))
+    .limit(1);
+
+  return results[0];
+}
+
+// ============ API USAGE ============
+
+export async function recordApiUsage(
+  data: Omit<InsertApiUsage, 'id' | 'createdAt'>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.insert(apiUsage).values(data);
+}
+
+export async function getApiUsageStats(
+  userId: number,
+  startDate?: Date,
+  endDate?: Date
+): Promise<{
+  totalRequests: number;
+  totalTokens: number;
+  avgResponseTime: number;
+}> {
+  const db = await getDb();
+  if (!db) return { totalRequests: 0, totalTokens: 0, avgResponseTime: 0 };
+
+  let conditions = [eq(apiUsage.userId, userId)];
+  
+  if (startDate) {
+    conditions.push(gte(apiUsage.createdAt, startDate));
+  }
+  if (endDate) {
+    conditions.push(lte(apiUsage.createdAt, endDate));
+  }
+
+  const usage = await db.select()
+    .from(apiUsage)
+    .where(and(...conditions));
+
+  const totalRequests = usage.length;
+  const totalTokens = usage.reduce((sum, u) => sum + (u.tokensUsed || 0), 0);
+  const avgResponseTime = totalRequests > 0
+    ? usage.reduce((sum, u) => sum + (u.responseTimeMs || 0), 0) / totalRequests
+    : 0;
+
+  return { totalRequests, totalTokens, avgResponseTime };
 }
