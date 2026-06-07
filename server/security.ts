@@ -216,9 +216,11 @@ export function securityHeaders(
   res.setHeader("X-Frame-Options", "DENY");
 
   // Content Security Policy
+  // Note: 'unsafe-inline' is needed for many frameworks. For better security, 
+  // consider implementing nonce-based CSP in production.
   res.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;"
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:;"
   );
 
   // Strict Transport Security

@@ -194,7 +194,7 @@ export function createSSEHandler(
   ) => Promise<void>
 ) {
   return async (req: Request, res: Response) => {
-    const connectionId = "sse-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
+    const connectionId = "sse-" + Date.now() + "-" + Math.random().toString(36).slice(2, 11);
 
     // Register SSE connection
     sseManager.register(connectionId, res);
