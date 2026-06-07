@@ -835,7 +835,7 @@ export async function getFeedbackByAgentId(
   const db = await getDb();
   if (!db) return [];
 
-  let conditions = [eq(conversationFeedback.agentId, agentId)];
+  const conditions = [eq(conversationFeedback.agentId, agentId)];
   
   if (startDate) {
     conditions.push(gte(conversationFeedback.createdAt, startDate));
@@ -953,7 +953,7 @@ export async function getAuditLogs(
   const db = await getDb();
   if (!db) return [];
 
-  let conditions = [];
+  const conditions = [];
   
   if (userId) {
     conditions.push(eq(auditLogs.userId, userId));
@@ -1026,7 +1026,7 @@ export async function getFrameTemplates(category?: string, type?: string): Promi
   const db = await getDb();
   if (!db) return [];
 
-  let conditions = [eq(frameTemplates.isPublic, 1)];
+  const conditions = [eq(frameTemplates.isPublic, 1)];
   
   if (category) {
     conditions.push(eq(frameTemplates.category, category));
@@ -1076,7 +1076,7 @@ export async function getApiUsageStats(
   const db = await getDb();
   if (!db) return { totalRequests: 0, totalTokens: 0, avgResponseTime: 0 };
 
-  let conditions = [eq(apiUsage.userId, userId)];
+  const conditions = [eq(apiUsage.userId, userId)];
   
   if (startDate) {
     conditions.push(gte(apiUsage.createdAt, startDate));

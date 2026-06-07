@@ -198,8 +198,10 @@ function isValidUtf8(buffer: Buffer): boolean {
     // Check for null bytes or other binary indicators
     if (text.includes("\x00")) return false;
     // Simple heuristic: if more than 10% are control characters, probably binary
-    const controlChars = text.replace(/[\x00-\x1f\x7f-\x9f]/g, "").length;
-    const ratio = controlChars / text.length;
+    // controlChars is the count of NON-control characters after removing control chars
+    const nonControlChars = text.replace(/[\x00-\x1f\x7f-\x9f]/g, "").length;
+    const ratio = nonControlChars / text.length;
+    // If ratio > 0.8, most characters are printable (valid text)
     return ratio > 0.8;
   } catch {
     return false;

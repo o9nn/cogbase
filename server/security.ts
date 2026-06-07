@@ -241,13 +241,17 @@ export function securityHeaders(
 
 /**
  * Input Sanitization
+ * Note: For user-generated HTML content, consider using a dedicated library like DOMPurify.
+ * This function provides basic sanitization for text inputs.
  */
 export function sanitizeInput(input: string): string {
-  // Remove potential XSS vectors
+  // For plain text inputs, encode HTML entities instead of trying to filter
   return input
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-    .replace(/javascript:/gi, "")
-    .replace(/on\w+=/gi, "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;")
     .trim();
 }
 
