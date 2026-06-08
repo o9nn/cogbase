@@ -573,6 +573,63 @@ const ragRouter = router({
       await processDocumentForRAG(input.documentId, input.agentId, input.content);
       return { success: true };
     }),
+
+  // Get document versions
+  getDocumentVersions: protectedProcedure
+    .input(z.object({ documentId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return db.getDocumentVersions(input.documentId);
+    }),
+
+  // Update document with versioning
+  updateDocument: protectedProcedure
+    .input(z.object({
+      documentId: z.number(),
+      content: z.string(),
+      changeDescription: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const document = await db.updateDocumentWithVersion(
+        input.documentId,
+        ctx.user.id,
+        {
+          content: input.content,
+          changeDescription: input.changeDescription,
+        }
+      );
+      
+      if (!document) {
+        throw new Error("Document not found or unauthorized");
+      }
+      
+      // Reprocess document with new content
+      await processDocumentForRAG(document.id, document.agentId, input.content);
+      
+      return document;
+    }),
+
+  // Revert document to a previous version
+  revertDocument: protectedProcedure
+    .input(z.object({
+      documentId: z.number(),
+      targetVersion: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const document = await db.revertDocumentToVersion(
+        input.documentId,
+        ctx.user.id,
+        input.targetVersion
+      );
+      
+      if (!document) {
+        throw new Error("Document or version not found");
+      }
+      
+      // Reprocess document
+      await processDocumentForRAG(document.id, document.agentId, document.content);
+      
+      return document;
+    }),
 });
 
 // ============ UI FLOW ROUTER ============
@@ -722,6 +779,53 @@ const uiFlowRouter = router({
     .mutation(async ({ ctx, input }) => {
       await db.deleteUiConnection(input.id, input.flowId);
       return { success: true };
+    }),
+
+  // Get flow versions
+  getVersions: protectedProcedure
+    .input(z.object({ flowId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return db.getUiFlowVersions(input.flowId);
+    }),
+
+  // Save current flow state as a version
+  saveVersion: protectedProcedure
+    .input(z.object({
+      flowId: z.number(),
+      changeDescription: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const version = await db.saveUiFlowVersion(
+        input.flowId,
+        ctx.user.id,
+        input.changeDescription
+      );
+      
+      if (!version) {
+        throw new Error("Failed to save flow version");
+      }
+      
+      return version;
+    }),
+
+  // Revert flow to a previous version
+  revertToVersion: protectedProcedure
+    .input(z.object({
+      flowId: z.number(),
+      targetVersion: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const flow = await db.revertUiFlowToVersion(
+        input.flowId,
+        ctx.user.id,
+        input.targetVersion
+      );
+      
+      if (!flow) {
+        throw new Error("Flow or version not found");
+      }
+      
+      return flow;
     }),
 });
 
