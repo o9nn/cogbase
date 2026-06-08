@@ -725,6 +725,51 @@ const uiFlowRouter = router({
     }),
 });
 
+// ============ FEEDBACK ROUTER ============
+const feedbackRouter = router({
+  // Submit feedback for a message or session
+  submit: protectedProcedure
+    .input(z.object({
+      sessionId: z.number(),
+      messageId: z.number().optional(),
+      agentId: z.number(),
+      feedbackType: z.enum(["thumbs_up", "thumbs_down", "rating", "comment"]),
+      rating: z.number().min(1).max(5).optional(),
+      feedback: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return db.createConversationFeedback({
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        agentId: input.agentId,
+        userId: ctx.user.id,
+        feedbackType: input.feedbackType,
+        rating: input.rating,
+        feedback: input.feedback,
+      });
+    }),
+
+  // Get feedback for an agent
+  getByAgent: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const startDate = input.startDate ? new Date(input.startDate) : undefined;
+      const endDate = input.endDate ? new Date(input.endDate) : undefined;
+      return db.getFeedbackByAgentId(input.agentId, startDate, endDate);
+    }),
+
+  // Get feedback stats for an agent
+  getStats: protectedProcedure
+    .input(z.object({ agentId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return db.getFeedbackStats(input.agentId);
+    }),
+});
+
 // ============ MAIN ROUTER ============
 export const appRouter = router({
   system: systemRouter,
@@ -744,6 +789,7 @@ export const appRouter = router({
   export: exportRouter,
   rag: ragRouter,
   uiFlow: uiFlowRouter,
+  feedback: feedbackRouter,
 });
 
 export type AppRouter = typeof appRouter;

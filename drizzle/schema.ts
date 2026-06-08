@@ -261,3 +261,168 @@ export const uiConnections = mysqlTable("uiConnections", {
 
 export type UiConnection = typeof uiConnections.$inferSelect;
 export type InsertUiConnection = typeof uiConnections.$inferInsert;
+
+/**
+ * Agent Versions - stores configuration history for rollback
+ */
+export const agentVersions = mysqlTable("agentVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  agentId: int("agentId").notNull(),
+  userId: int("userId").notNull(),
+  version: int("version").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  systemPrompt: text("systemPrompt"),
+  model: varchar("model", { length: 64 }).notNull(),
+  conversationStarters: json("conversationStarters").$type<string[]>(),
+  constraints: json("constraints").$type<string[]>(),
+  temperature: decimal("temperature", { precision: 3, scale: 2 }),
+  maxTokens: int("maxTokens"),
+  changeDescription: text("changeDescription"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AgentVersion = typeof agentVersions.$inferSelect;
+export type InsertAgentVersion = typeof agentVersions.$inferInsert;
+
+/**
+ * Conversation Feedback - user satisfaction ratings
+ */
+export const conversationFeedback = mysqlTable("conversationFeedback", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  messageId: int("messageId"),
+  agentId: int("agentId").notNull(),
+  userId: int("userId"),
+  rating: int("rating"), // 1-5 stars
+  feedback: text("feedback"),
+  feedbackType: mysqlEnum("feedbackType", ["thumbs_up", "thumbs_down", "rating", "comment"]).notNull(),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ConversationFeedback = typeof conversationFeedback.$inferSelect;
+export type InsertConversationFeedback = typeof conversationFeedback.$inferInsert;
+
+/**
+ * Audit Logs - security and compliance tracking
+ */
+export const auditLogs = mysqlTable("auditLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"),
+  action: varchar("action", { length: 64 }).notNull(),
+  resource: varchar("resource", { length: 64 }).notNull(),
+  resourceId: int("resourceId"),
+  details: json("details").$type<Record<string, unknown>>(),
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  userAgent: text("userAgent"),
+  status: mysqlEnum("status", ["success", "failure", "error"]).default("success").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertAuditLog = typeof auditLogs.$inferInsert;
+
+/**
+ * Webhooks - integration webhook configurations
+ */
+export const webhooks = mysqlTable("webhooks", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  agentId: int("agentId"),
+  name: varchar("name", { length: 255 }).notNull(),
+  url: text("url").notNull(),
+  secret: varchar("secret", { length: 128 }),
+  events: json("events").$type<string[]>(),
+  isActive: int("isActive").default(1).notNull(),
+  lastTriggeredAt: timestamp("lastTriggeredAt"),
+  failureCount: int("failureCount").default(0),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Webhook = typeof webhooks.$inferSelect;
+export type InsertWebhook = typeof webhooks.$inferInsert;
+
+/**
+ * API Usage - tracking API calls for rate limiting and billing
+ */
+export const apiUsage = mysqlTable("apiUsage", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  apiKeyId: varchar("apiKeyId", { length: 64 }),
+  endpoint: varchar("endpoint", { length: 255 }).notNull(),
+  method: varchar("method", { length: 10 }).notNull(),
+  statusCode: int("statusCode"),
+  responseTimeMs: int("responseTimeMs"),
+  tokensUsed: int("tokensUsed"),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ApiUsage = typeof apiUsage.$inferSelect;
+export type InsertApiUsage = typeof apiUsage.$inferInsert;
+
+/**
+ * Flow Templates - pre-built UI flow templates
+ */
+export const flowTemplates = mysqlTable("flowTemplates", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 64 }),
+  thumbnail: text("thumbnail"),
+  flowData: json("flowData").$type<{
+    frames: Array<{
+      frameId: string;
+      name: string;
+      type: string;
+      positionX: number;
+      positionY: number;
+      width: number;
+      height: number;
+      config?: Record<string, unknown>;
+    }>;
+    connections: Array<{
+      connectionId: string;
+      sourceFrameId: string;
+      targetFrameId: string;
+      label?: string;
+      type?: string;
+    }>;
+    mermaidDiagram?: string;
+  }>(),
+  isPublic: int("isPublic").default(1).notNull(),
+  usageCount: int("usageCount").default(0),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type FlowTemplate = typeof flowTemplates.$inferSelect;
+export type InsertFlowTemplate = typeof flowTemplates.$inferInsert;
+
+/**
+ * Frame Templates - pre-built frame/component templates
+ */
+export const frameTemplates = mysqlTable("frameTemplates", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  type: varchar("type", { length: 64 }).notNull(), // button, input, message, carousel, etc.
+  category: varchar("category", { length: 64 }),
+  icon: varchar("icon", { length: 64 }),
+  defaultConfig: json("defaultConfig").$type<{
+    width: number;
+    height: number;
+    style?: Record<string, unknown>;
+    properties?: Record<string, unknown>;
+  }>(),
+  isPublic: int("isPublic").default(1).notNull(),
+  usageCount: int("usageCount").default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type FrameTemplate = typeof frameTemplates.$inferSelect;
+export type InsertFrameTemplate = typeof frameTemplates.$inferInsert;

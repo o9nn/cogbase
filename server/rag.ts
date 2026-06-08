@@ -4,59 +4,21 @@
  */
 
 import * as db from "./db";
+import {
+  createEmbedding,
+  createEmbeddingsBatch,
+  cosineSimilarity,
+  isOpenAIConfigured,
+} from "./embeddings";
+import {
+  processDocument as processDocumentContent,
+  chunkText as chunkTextAdvanced,
+  ChunkingOptions,
+  validateFileType,
+} from "./documentProcessor";
 
-/**
- * Simple cosine similarity calculation between two vectors
- */
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0;
-  
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-/**
- * Simple text embedding using character frequencies
- * 
- * ⚠️ WARNING: THIS IS A DEVELOPMENT PLACEHOLDER ONLY ⚠️
- * 
- * This implementation is NOT suitable for production use. It creates embeddings
- * based on character frequencies which will not produce meaningful semantic
- * similarity results.
- * 
- * For production, replace this with OpenAI's embedding API:
- * - Use `text-embedding-ada-002` or `text-embedding-3-small`
- * - Call OpenAI API: `POST https://api.openai.com/v1/embeddings`
- * - Store the returned 1536-dimensional vector
- * 
- * @deprecated Replace with proper embedding API before production deployment
- */
-function createSimpleEmbedding(text: string): number[] {
-  console.warn("[RAG] WARNING: Using placeholder embedding function. Replace with OpenAI API for production!");
-  
-  const embedding = new Array(128).fill(0);
-  const normalized = text.toLowerCase();
-  
-  // Create a simple embedding based on character frequencies
-  for (let i = 0; i < normalized.length; i++) {
-    const charCode = normalized.charCodeAt(i);
-    const index = charCode % 128;
-    embedding[index] += 1;
-  }
-  
-  // Normalize
-  const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
-  return embedding.map(val => magnitude > 0 ? val / magnitude : 0);
-}
+// Re-export for backward compatibility
+export { validateFileType };
 
 /**
  * Retrieve relevant context from training documents using RAG
@@ -81,9 +43,8 @@ export async function retrieveRelevantContext(
       return null;
     }
     
-    // Create embedding for the query
-    // In production, use OpenAI's embedding API
-    const queryEmbedding = createSimpleEmbedding(query);
+    // Create embedding for the query using production OpenAI API
+    const queryEmbedding = await createEmbedding(query);
     
     // Calculate similarity scores
     const scoredEmbeddings = embeddings
@@ -119,38 +80,31 @@ export async function retrieveRelevantContext(
 
 /**
  * Chunk text into smaller pieces for embedding
+ * Supports multiple strategies: fixed, sentence, paragraph, semantic
  */
-export function chunkText(text: string, chunkSize: number = 512, overlap: number = 50): string[] {
-  const chunks: string[] = [];
-  let start = 0;
-  
-  while (start < text.length) {
-    const end = Math.min(start + chunkSize, text.length);
-    const chunk = text.slice(start, end);
-    chunks.push(chunk);
-    
-    // Move start position with overlap
-    const nextStart = end - overlap;
-    
-    // Avoid infinite loop if overlap is too large or we've reached the end
-    if (nextStart <= start || end >= text.length) {
-      break;
-    }
-    
-    start = nextStart;
-  }
-  
-  return chunks;
+export function chunkText(
+  text: string, 
+  chunkSize: number = 512, 
+  overlap: number = 50,
+  strategy: "fixed" | "sentence" | "paragraph" | "semantic" = "fixed"
+): string[] {
+  return chunkTextAdvanced(text, {
+    strategy,
+    chunkSize,
+    overlap,
+  });
 }
 
 /**
  * Process a document for RAG training
- * Creates chunks and generates embeddings
+ * Creates chunks and generates embeddings using OpenAI API
  */
 export async function processDocumentForRAG(
   documentId: number,
   agentId: number,
-  content: string
+  content: string,
+  fileName?: string,
+  fileType?: string
 ): Promise<void> {
   try {
     // Get RAG configuration
@@ -159,14 +113,42 @@ export async function processDocumentForRAG(
     // Update document status
     await db.updateTrainingDocument(documentId, { status: "processing" });
     
-    // Chunk the content
-    const chunks = chunkText(content, config.chunkSize || 512, config.chunkOverlap || 50);
+    // Process document content if file info provided
+    let processedText = content;
+    let metadata: Record<string, unknown> = {};
     
-    // Create embeddings for each chunk
-    // In production, this would use OpenAI's embedding API in batches
+    if (fileName && fileType) {
+      try {
+        const result = await processDocumentContent(content, fileName, fileType);
+        processedText = result.text;
+        metadata = result.metadata;
+      } catch (error) {
+        console.warn("[RAG] Document processing error, using raw content:", error);
+      }
+    }
+    
+    // Determine chunking strategy based on configuration or content type
+    const chunkingStrategy = determineChunkingStrategy(processedText, config);
+    
+    // Chunk the content
+    const chunks = chunkText(
+      processedText, 
+      config.chunkSize || 512, 
+      config.chunkOverlap || 50,
+      chunkingStrategy
+    );
+    
+    // Generate embeddings in batches using OpenAI API
+    console.log(`[RAG] Generating embeddings for ${chunks.length} chunks...`);
+    
+    const embeddings = await createEmbeddingsBatch(chunks, {
+      model: (config.embeddingModel as "text-embedding-3-small") || "text-embedding-3-small",
+    });
+    
+    // Store embeddings in database
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      const embedding = createSimpleEmbedding(chunk);
+      const embedding = embeddings[i];
       
       await db.createVectorEmbedding({
         documentId,
@@ -176,6 +158,8 @@ export async function processDocumentForRAG(
         embedding,
         metadata: {
           chunkSize: chunk.length,
+          chunkingStrategy,
+          ...metadata,
         },
       });
     }
@@ -185,11 +169,36 @@ export async function processDocumentForRAG(
       status: "completed",
       chunkCount: chunks.length,
     });
+    
+    console.log(`[RAG] Successfully processed document ${documentId} with ${chunks.length} chunks`);
   } catch (error) {
     console.error("[RAG] Error processing document:", error);
     await db.updateTrainingDocument(documentId, { status: "failed" });
     throw error;
   }
+}
+
+/**
+ * Determine optimal chunking strategy based on content
+ */
+function determineChunkingStrategy(
+  text: string,
+  _config: db.RagConfiguration
+): "fixed" | "sentence" | "paragraph" | "semantic" {
+  // If content has clear paragraph structure, use paragraph chunking
+  const paragraphs = text.split(/\n\n+/).filter(p => p.trim().length > 0);
+  if (paragraphs.length > 3) {
+    return "paragraph";
+  }
+  
+  // If content has clear sentence structure, use sentence chunking
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+  if (sentences.length > 10) {
+    return "sentence";
+  }
+  
+  // Default to fixed chunking
+  return "fixed";
 }
 
 /**
@@ -206,4 +215,44 @@ ${context}
 
 Using the context above, please respond to the following:
 ${originalPrompt}`;
+}
+
+/**
+ * Check if RAG system is properly configured for production
+ */
+export function checkRAGConfiguration(): {
+  isConfigured: boolean;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  
+  if (!isOpenAIConfigured()) {
+    warnings.push("OpenAI API key not configured - using placeholder embeddings");
+  }
+  
+  return {
+    isConfigured: warnings.length === 0,
+    warnings,
+  };
+}
+
+/**
+ * Get RAG system status
+ */
+export async function getRAGStatus(agentId: number): Promise<{
+  enabled: boolean;
+  documentsCount: number;
+  chunksCount: number;
+  isProductionReady: boolean;
+}> {
+  const config = await db.getOrCreateRagConfig(agentId);
+  const documents = await db.getTrainingDocumentsByAgentId(agentId);
+  const embeddings = await db.getVectorEmbeddingsByAgentId(agentId);
+  
+  return {
+    enabled: config.enabled === 1,
+    documentsCount: documents.length,
+    chunksCount: embeddings.length,
+    isProductionReady: isOpenAIConfigured(),
+  };
 }
