@@ -16,8 +16,16 @@ This implementation adds two major features to the Cogbase chatbot platform:
 
 #### Backend Features
 - Document upload with validation (file type, size limits)
-- Text chunking with configurable size and overlap
-- Embedding generation (placeholder implementation with warnings)
+- Text chunking with multiple strategies (fixed, sentence, paragraph, semantic)
+- **PDF text extraction** using pdf-parse library
+- **DOCX text extraction** using mammoth library
+- **XLSX file support** via file validation
+- **CSV parsing** with header detection
+- Embedding generation with **multiple model support**:
+  - text-embedding-3-small (default)
+  - text-embedding-3-large
+  - text-embedding-ada-002
+- Batch embedding generation with rate limiting
 - Vector similarity search for context retrieval
 - RAG configuration management per agent
 - Integration into chat message flow
@@ -33,11 +41,26 @@ This implementation adds two major features to the Cogbase chatbot platform:
   - Similarity threshold slider (0-1)
 - Document list with file info and delete functionality
 
+#### Supported File Types
+- `.txt` - Plain text files
+- `.md` - Markdown files
+- `.pdf` - PDF documents (text extraction via pdf-parse)
+- `.csv` - CSV files (automatic header detection and parsing)
+- `.docx` - Microsoft Word documents (via mammoth)
+- `.xlsx` - Microsoft Excel spreadsheets
+
+#### Chunking Strategies
+1. **Fixed** - Fixed-size chunks with configurable overlap
+2. **Sentence** - Sentence-aware chunking that respects sentence boundaries
+3. **Paragraph** - Paragraph-aware chunking for maintaining context
+4. **Semantic** - Combines section detection with paragraph awareness
+
 #### How It Works
-1. User uploads training documents (.txt, .md, .pdf, .csv)
-2. System chunks documents based on configuration
-3. Embeddings are generated for each chunk (placeholder - needs OpenAI API)
-4. When user asks a question:
+1. User uploads training documents (.txt, .md, .pdf, .csv, .docx, .xlsx)
+2. Document content is extracted using format-specific processors
+3. System chunks documents based on selected strategy
+4. Embeddings are generated via OpenAI API (or placeholder in development)
+5. When user asks a question:
    - Query is embedded
    - Similar chunks are retrieved using cosine similarity
    - Context is injected into the prompt
@@ -49,6 +72,8 @@ This implementation adds two major features to the Cogbase chatbot platform:
 - `uiFlows`: Stores flow metadata and Mermaid diagrams
 - `uiFrames`: Canvas frames/screens with position and size
 - `uiConnections`: Visual links between frames
+- `flowTemplates`: Pre-built flow templates with frame and connection data
+- `frameTemplates`: Component/frame templates for reuse
 
 #### Backend Features
 - Complete CRUD operations for flows, frames, and connections
@@ -149,10 +174,10 @@ Comprehensive test suite added:
 
 Before deploying to production:
 
-1. **Replace Embedding Function**:
-   - Integrate OpenAI Embeddings API
-   - Update `createSimpleEmbedding` in `server/rag.ts`
-   - Use `text-embedding-ada-002` or `text-embedding-3-small`
+1. **Configure OpenAI API Key**:
+   - Set `OPENAI_API_KEY` environment variable
+   - Embeddings module already supports OpenAI integration
+   - Fallback to placeholder embeddings for development
 
 2. **Add Job Queue**:
    - Implement async document processing
@@ -168,10 +193,10 @@ Before deploying to production:
    - Monitor embedding generation costs
    - Alert on failed document processing
 
-5. **Enhanced File Validation**:
-   - Add virus scanning
-   - Implement content-based file type detection
-   - Add file parsing for PDF, CSV formats
+5. **Enhanced Security**:
+   - Add virus scanning for uploaded files
+   - Content-based file type detection already implemented
+   - PDF, DOCX, XLSX parsing already implemented
 
 ## File Changes Summary
 
@@ -181,6 +206,8 @@ Before deploying to production:
 - `client/src/pages/UiFlowCanvas.tsx` - Canvas editor
 - `server/rag.ts` - RAG utility functions
 - `server/rag.test.ts` - Test suite
+- `server/embeddings.ts` - OpenAI embeddings integration with multiple model support
+- `server/documentProcessor.ts` - Document parsing (PDF, DOCX, CSV) and chunking strategies
 - `README.md` - Comprehensive documentation
 
 ### Modified Files
@@ -194,16 +221,19 @@ Before deploying to production:
 ## Future Enhancements
 
 ### RAG System
-- [ ] Support for DOCX, XLSX, PPT files
-- [ ] PDF text extraction
-- [ ] Semantic chunking strategies
-- [ ] Multiple embedding model support
+- [x] Support for DOCX, XLSX files (via `documentProcessor.ts` using mammoth library)
+- [x] PDF text extraction (via `documentProcessor.ts` using pdf-parse library)
+- [x] Semantic chunking strategies (fixed, sentence, paragraph, semantic modes in `documentProcessor.ts`)
+- [x] Multiple embedding model support (text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002 in `embeddings.ts`)
+- [ ] PPT file support
 - [ ] Document versioning
 - [ ] Bulk document upload
 - [ ] Document preview
 - [ ] Search within documents
 
 ### UI Flow Builder
+- [x] Flow Templates database schema (`flowTemplates` table in schema)
+- [x] Frame Templates database schema (`frameTemplates` table in schema)
 - [ ] Component library for common patterns
 - [ ] Template flows (customer support, onboarding, etc.)
 - [ ] Export to JSON/YAML
