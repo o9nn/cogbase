@@ -668,6 +668,110 @@ export async function deleteVectorEmbeddingsByDocumentId(documentId: number): Pr
   await db.delete(vectorEmbeddings).where(eq(vectorEmbeddings.documentId, documentId));
 }
 
+export async function getVectorEmbeddingsByDocumentId(documentId: number): Promise<VectorEmbedding[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(vectorEmbeddings)
+    .where(eq(vectorEmbeddings.documentId, documentId))
+    .orderBy(vectorEmbeddings.chunkIndex);
+}
+
+export async function getTrainingDocumentById(
+  documentId: number,
+  userId: number
+): Promise<TrainingDocument | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const docs = await db.select()
+    .from(trainingDocuments)
+    .where(
+      and(
+        eq(trainingDocuments.id, documentId),
+        eq(trainingDocuments.userId, userId)
+      )
+    );
+
+  return docs[0];
+}
+
+export async function searchTrainingDocuments(
+  agentId: number,
+  userId: number,
+  query: string,
+  limit: number = 20
+): Promise<Array<{
+  id: number;
+  fileName: string;
+  fileType: string;
+  status: string;
+  matchCount: number;
+  preview: string;
+  createdAt: Date;
+}>> {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Get all documents for this agent/user
+  const docs = await db.select()
+    .from(trainingDocuments)
+    .where(
+      and(
+        eq(trainingDocuments.agentId, agentId),
+        eq(trainingDocuments.userId, userId)
+      )
+    )
+    .orderBy(desc(trainingDocuments.updatedAt));
+
+  // Full-text search in application layer
+  const searchTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+  
+  const results = docs
+    .map(doc => {
+      const content = doc.content.toLowerCase();
+      let matchCount = 0;
+      let bestMatchStart = -1;
+      
+      for (const term of searchTerms) {
+        let idx = content.indexOf(term);
+        while (idx !== -1) {
+          matchCount++;
+          if (bestMatchStart === -1) {
+            bestMatchStart = idx;
+          }
+          idx = content.indexOf(term, idx + 1);
+        }
+      }
+      
+      // Generate preview around the first match
+      let preview = "";
+      if (bestMatchStart >= 0) {
+        const start = Math.max(0, bestMatchStart - 50);
+        const end = Math.min(doc.content.length, bestMatchStart + 200);
+        preview = (start > 0 ? "..." : "") + doc.content.slice(start, end) + (end < doc.content.length ? "..." : "");
+      } else {
+        preview = doc.content.slice(0, 200) + (doc.content.length > 200 ? "..." : "");
+      }
+      
+      return {
+        id: doc.id,
+        fileName: doc.fileName,
+        fileType: doc.fileType,
+        status: doc.status,
+        matchCount,
+        preview,
+        createdAt: doc.createdAt,
+      };
+    })
+    .filter(r => r.matchCount > 0)
+    .sort((a, b) => b.matchCount - a.matchCount)
+    .slice(0, limit);
+
+  return results;
+}
+
 // ============ UI FLOWS ============
 
 export async function createUiFlow(flow: InsertUiFlow): Promise<UiFlow> {

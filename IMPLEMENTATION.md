@@ -225,11 +225,11 @@ Before deploying to production:
 - [x] PDF text extraction (via `documentProcessor.ts` using pdf-parse library)
 - [x] Semantic chunking strategies (fixed, sentence, paragraph, semantic modes in `documentProcessor.ts`)
 - [x] Multiple embedding model support (text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002 in `embeddings.ts`)
-- [ ] PPT file support
-- [ ] Document versioning
-- [ ] Bulk document upload
-- [ ] Document preview
-- [ ] Search within documents
+- [x] PPT file support (via `documentProcessor.ts` using officeparser library)
+- [x] Document versioning (via `documentVersions` table and API endpoints)
+- [x] Bulk document upload (upload up to 20 files at once)
+- [x] Document preview (view content, chunks, and version history)
+- [x] Search within documents (full-text and semantic search)
 
 ### UI Flow Builder
 - [x] Flow Templates database schema (`flowTemplates` table in schema)
