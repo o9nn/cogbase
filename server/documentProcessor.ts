@@ -203,13 +203,21 @@ export async function validateFileType(
   }
 
   if (extension === ".ppt") {
-    // Legacy PPT files have a different signature (OLE Compound Document)
-    // For simplicity, we'll allow them based on extension
+    // Legacy PPT files use OLE Compound Document format (D0 CF 11 E0 A1 B1 1A E1)
+    const oleSignature = { bytes: [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] };
+    if (matchesMagicBytes(buffer, oleSignature)) {
+      return {
+        isValid: true,
+        detectedType: "application/vnd.ms-powerpoint",
+        extension,
+        message: "Valid PPT file",
+      };
+    }
     return {
-      isValid: true,
-      detectedType: "application/vnd.ms-powerpoint",
+      isValid: false,
+      detectedType: null,
       extension,
-      message: "Valid PPT file",
+      message: "File does not appear to be a valid PPT",
     };
   }
 

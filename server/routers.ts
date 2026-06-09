@@ -692,7 +692,8 @@ const ragRouter = router({
             results.push({ fileName: doc.fileName, success: true, documentId: document.id });
           } catch (procError) {
             console.error("Error processing document:", procError);
-            results.push({ fileName: doc.fileName, success: true, documentId: document.id, error: "Processing failed, will retry" });
+            // Document was uploaded but embedding generation failed - user can manually reprocess later
+            results.push({ fileName: doc.fileName, success: true, documentId: document.id, error: "Uploaded but processing failed" });
           }
         } catch (error) {
           results.push({ fileName: doc.fileName, success: false, error: (error as Error).message });
