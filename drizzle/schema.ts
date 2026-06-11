@@ -160,6 +160,8 @@ export const trainingDocuments = mysqlTable("trainingDocuments", {
   content: text("content").notNull(),
   status: mysqlEnum("status", ["pending", "processing", "completed", "failed"]).default("pending").notNull(),
   chunkCount: int("chunkCount").default(0),
+  version: int("version").default(1).notNull(),
+  parentDocumentId: int("parentDocumentId"),
   metadata: json("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -167,6 +169,24 @@ export const trainingDocuments = mysqlTable("trainingDocuments", {
 
 export type TrainingDocument = typeof trainingDocuments.$inferSelect;
 export type InsertTrainingDocument = typeof trainingDocuments.$inferInsert;
+
+/**
+ * Document versions for version history tracking
+ */
+export const documentVersions = mysqlTable("documentVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  documentId: int("documentId").notNull(),
+  version: int("version").notNull(),
+  content: text("content").notNull(),
+  fileSize: int("fileSize"),
+  chunkCount: int("chunkCount").default(0),
+  changeDescription: text("changeDescription"),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type DocumentVersion = typeof documentVersions.$inferSelect;
+export type InsertDocumentVersion = typeof documentVersions.$inferInsert;
 
 /**
  * RAG configurations for agents
@@ -214,6 +234,8 @@ export const uiFlows = mysqlTable("uiFlows", {
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   mermaidDiagram: text("mermaidDiagram"),
+  version: int("version").default(1).notNull(),
+  isPublished: int("isPublished").default(0).notNull(),
   metadata: json("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -221,6 +243,43 @@ export const uiFlows = mysqlTable("uiFlows", {
 
 export type UiFlow = typeof uiFlows.$inferSelect;
 export type InsertUiFlow = typeof uiFlows.$inferInsert;
+
+/**
+ * UI Flow Versions - stores flow history for version control
+ */
+export const uiFlowVersions = mysqlTable("uiFlowVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  flowId: int("flowId").notNull(),
+  version: int("version").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  mermaidDiagram: text("mermaidDiagram"),
+  flowData: json("flowData").$type<{
+    frames: Array<{
+      frameId: string;
+      name: string;
+      type: string;
+      positionX: number;
+      positionY: number;
+      width: number;
+      height: number;
+      config?: Record<string, unknown>;
+    }>;
+    connections: Array<{
+      connectionId: string;
+      sourceFrameId: string;
+      targetFrameId: string;
+      label?: string;
+      type?: string;
+    }>;
+  }>(),
+  changeDescription: text("changeDescription"),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type UiFlowVersion = typeof uiFlowVersions.$inferSelect;
+export type InsertUiFlowVersion = typeof uiFlowVersions.$inferInsert;
 
 /**
  * UI Frames (screens/components in canvas)

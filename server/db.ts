@@ -10,9 +10,11 @@ import {
   exportedFiles, InsertExportedFile,
   alerts, InsertAlert, Alert,
   trainingDocuments, InsertTrainingDocument, TrainingDocument,
+  documentVersions, InsertDocumentVersion, DocumentVersion,
   ragConfigurations, InsertRagConfiguration, RagConfiguration,
   vectorEmbeddings, InsertVectorEmbedding, VectorEmbedding,
   uiFlows, InsertUiFlow, UiFlow,
+  uiFlowVersions, InsertUiFlowVersion, UiFlowVersion,
   uiFrames, InsertUiFrame, UiFrame,
   uiConnections, InsertUiConnection, UiConnection,
   agentVersions, InsertAgentVersion, AgentVersion,
@@ -666,6 +668,110 @@ export async function deleteVectorEmbeddingsByDocumentId(documentId: number): Pr
   await db.delete(vectorEmbeddings).where(eq(vectorEmbeddings.documentId, documentId));
 }
 
+export async function getVectorEmbeddingsByDocumentId(documentId: number): Promise<VectorEmbedding[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(vectorEmbeddings)
+    .where(eq(vectorEmbeddings.documentId, documentId))
+    .orderBy(vectorEmbeddings.chunkIndex);
+}
+
+export async function getTrainingDocumentById(
+  documentId: number,
+  userId: number
+): Promise<TrainingDocument | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const docs = await db.select()
+    .from(trainingDocuments)
+    .where(
+      and(
+        eq(trainingDocuments.id, documentId),
+        eq(trainingDocuments.userId, userId)
+      )
+    );
+
+  return docs[0];
+}
+
+export async function searchTrainingDocuments(
+  agentId: number,
+  userId: number,
+  query: string,
+  limit: number = 20
+): Promise<Array<{
+  id: number;
+  fileName: string;
+  fileType: string;
+  status: string;
+  matchCount: number;
+  preview: string;
+  createdAt: Date;
+}>> {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Get all documents for this agent/user
+  const docs = await db.select()
+    .from(trainingDocuments)
+    .where(
+      and(
+        eq(trainingDocuments.agentId, agentId),
+        eq(trainingDocuments.userId, userId)
+      )
+    )
+    .orderBy(desc(trainingDocuments.updatedAt));
+
+  // Full-text search in application layer
+  const searchTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+  
+  const results = docs
+    .map(doc => {
+      const content = doc.content.toLowerCase();
+      let matchCount = 0;
+      let bestMatchStart = -1;
+      
+      for (const term of searchTerms) {
+        let idx = content.indexOf(term);
+        while (idx !== -1) {
+          matchCount++;
+          if (bestMatchStart === -1) {
+            bestMatchStart = idx;
+          }
+          idx = content.indexOf(term, idx + 1);
+        }
+      }
+      
+      // Generate preview around the first match
+      let preview = "";
+      if (bestMatchStart >= 0) {
+        const start = Math.max(0, bestMatchStart - 50);
+        const end = Math.min(doc.content.length, bestMatchStart + 200);
+        preview = (start > 0 ? "..." : "") + doc.content.slice(start, end) + (end < doc.content.length ? "..." : "");
+      } else {
+        preview = doc.content.slice(0, 200) + (doc.content.length > 200 ? "..." : "");
+      }
+      
+      return {
+        id: doc.id,
+        fileName: doc.fileName,
+        fileType: doc.fileType,
+        status: doc.status,
+        matchCount,
+        preview,
+        createdAt: doc.createdAt,
+      };
+    })
+    .filter(r => r.matchCount > 0)
+    .sort((a, b) => b.matchCount - a.matchCount)
+    .slice(0, limit);
+
+  return results;
+}
+
 // ============ UI FLOWS ============
 
 export async function createUiFlow(flow: InsertUiFlow): Promise<UiFlow> {
@@ -1096,4 +1202,348 @@ export async function getApiUsageStats(
     : 0;
 
   return { totalRequests, totalTokens, avgResponseTime };
+}
+
+// ============ DOCUMENT VERSIONING FUNCTIONS ============
+
+export async function createDocumentVersion(
+  data: Omit<InsertDocumentVersion, "id" | "createdAt">
+): Promise<DocumentVersion> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(documentVersions).values(data);
+
+  const [version] = await db
+    .select()
+    .from(documentVersions)
+    .where(eq(documentVersions.id, Number(result[0].insertId)));
+
+  return version;
+}
+
+export async function getDocumentVersions(
+  documentId: number
+): Promise<DocumentVersion[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db
+    .select()
+    .from(documentVersions)
+    .where(eq(documentVersions.documentId, documentId))
+    .orderBy(desc(documentVersions.version));
+}
+
+export async function getDocumentVersion(
+  documentId: number,
+  version: number
+): Promise<DocumentVersion | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const [result] = await db
+    .select()
+    .from(documentVersions)
+    .where(
+      and(
+        eq(documentVersions.documentId, documentId),
+        eq(documentVersions.version, version)
+      )
+    )
+    .limit(1);
+
+  return result;
+}
+
+export async function updateDocumentWithVersion(
+  documentId: number,
+  userId: number,
+  data: { content: string; changeDescription?: string }
+): Promise<TrainingDocument | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  // Get current document
+  const [doc] = await db
+    .select()
+    .from(trainingDocuments)
+    .where(
+      and(
+        eq(trainingDocuments.id, documentId),
+        eq(trainingDocuments.userId, userId)
+      )
+    )
+    .limit(1);
+
+  if (!doc) return undefined;
+
+  // Create version record of current state
+  await createDocumentVersion({
+    documentId,
+    version: doc.version || 1,
+    content: doc.content,
+    fileSize: doc.fileSize,
+    chunkCount: doc.chunkCount,
+    changeDescription: data.changeDescription,
+    metadata: doc.metadata,
+  });
+
+  // Update document with new content and increment version
+  await db
+    .update(trainingDocuments)
+    .set({
+      content: data.content,
+      version: (doc.version || 1) + 1,
+      status: "pending",
+    })
+    .where(eq(trainingDocuments.id, documentId));
+
+  const [updated] = await db
+    .select()
+    .from(trainingDocuments)
+    .where(eq(trainingDocuments.id, documentId))
+    .limit(1);
+
+  return updated;
+}
+
+export async function revertDocumentToVersion(
+  documentId: number,
+  userId: number,
+  targetVersion: number
+): Promise<TrainingDocument | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  // Get target version
+  const version = await getDocumentVersion(documentId, targetVersion);
+  if (!version) return undefined;
+
+  // Get current document
+  const [doc] = await db
+    .select()
+    .from(trainingDocuments)
+    .where(
+      and(
+        eq(trainingDocuments.id, documentId),
+        eq(trainingDocuments.userId, userId)
+      )
+    )
+    .limit(1);
+
+  if (!doc) return undefined;
+
+  // Create version record of current state before reverting
+  await createDocumentVersion({
+    documentId,
+    version: doc.version || 1,
+    content: doc.content,
+    fileSize: doc.fileSize,
+    chunkCount: doc.chunkCount,
+    changeDescription: `Reverted to version ${targetVersion}`,
+    metadata: doc.metadata,
+  });
+
+  // Revert to target version content
+  await db
+    .update(trainingDocuments)
+    .set({
+      content: version.content,
+      fileSize: version.fileSize,
+      version: (doc.version || 1) + 1,
+      status: "pending",
+    })
+    .where(eq(trainingDocuments.id, documentId));
+
+  const [updated] = await db
+    .select()
+    .from(trainingDocuments)
+    .where(eq(trainingDocuments.id, documentId))
+    .limit(1);
+
+  return updated;
+}
+
+// ============ UI FLOW VERSION FUNCTIONS ============
+
+export async function createUiFlowVersion(
+  data: Omit<InsertUiFlowVersion, "id" | "createdAt">
+): Promise<UiFlowVersion> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(uiFlowVersions).values(data);
+
+  const [version] = await db
+    .select()
+    .from(uiFlowVersions)
+    .where(eq(uiFlowVersions.id, Number(result[0].insertId)));
+
+  return version;
+}
+
+export async function getUiFlowVersions(flowId: number): Promise<UiFlowVersion[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db
+    .select()
+    .from(uiFlowVersions)
+    .where(eq(uiFlowVersions.flowId, flowId))
+    .orderBy(desc(uiFlowVersions.version));
+}
+
+export async function getUiFlowVersion(
+  flowId: number,
+  version: number
+): Promise<UiFlowVersion | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const [result] = await db
+    .select()
+    .from(uiFlowVersions)
+    .where(
+      and(
+        eq(uiFlowVersions.flowId, flowId),
+        eq(uiFlowVersions.version, version)
+      )
+    )
+    .limit(1);
+
+  return result;
+}
+
+export async function saveUiFlowVersion(
+  flowId: number,
+  userId: number,
+  changeDescription?: string
+): Promise<UiFlowVersion | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  // Get current flow
+  const [flow] = await db
+    .select()
+    .from(uiFlows)
+    .where(and(eq(uiFlows.id, flowId), eq(uiFlows.userId, userId)))
+    .limit(1);
+
+  if (!flow) return undefined;
+
+  // Get current frames and connections
+  const frames = await db
+    .select()
+    .from(uiFrames)
+    .where(eq(uiFrames.flowId, flowId));
+
+  const connections = await db
+    .select()
+    .from(uiConnections)
+    .where(eq(uiConnections.flowId, flowId));
+
+  // Create version record
+  const version = await createUiFlowVersion({
+    flowId,
+    version: flow.version || 1,
+    name: flow.name,
+    description: flow.description,
+    mermaidDiagram: flow.mermaidDiagram,
+    flowData: {
+      frames: frames.map((f) => ({
+        frameId: f.frameId,
+        name: f.name,
+        type: f.type || "screen",
+        positionX: f.positionX || 0,
+        positionY: f.positionY || 0,
+        width: f.width || 300,
+        height: f.height || 200,
+        config: f.config || {},
+      })),
+      connections: connections.map((c) => ({
+        connectionId: c.connectionId,
+        sourceFrameId: c.sourceFrameId,
+        targetFrameId: c.targetFrameId,
+        label: c.label || undefined,
+        type: c.type || undefined,
+      })),
+    },
+    changeDescription,
+    createdBy: userId,
+  });
+
+  // Increment flow version
+  await db
+    .update(uiFlows)
+    .set({ version: (flow.version || 1) + 1 })
+    .where(eq(uiFlows.id, flowId));
+
+  return version;
+}
+
+export async function revertUiFlowToVersion(
+  flowId: number,
+  userId: number,
+  targetVersion: number
+): Promise<UiFlow | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  // Get target version
+  const version = await getUiFlowVersion(flowId, targetVersion);
+  if (!version || !version.flowData) return undefined;
+
+  // Save current state as a version first
+  await saveUiFlowVersion(flowId, userId, `Before reverting to version ${targetVersion}`);
+
+  // Delete current frames and connections
+  await db.delete(uiFrames).where(eq(uiFrames.flowId, flowId));
+  await db.delete(uiConnections).where(eq(uiConnections.flowId, flowId));
+
+  // Restore frames from version
+  for (const frame of version.flowData.frames) {
+    await db.insert(uiFrames).values({
+      flowId,
+      frameId: frame.frameId,
+      name: frame.name,
+      type: frame.type,
+      positionX: frame.positionX,
+      positionY: frame.positionY,
+      width: frame.width,
+      height: frame.height,
+      config: frame.config || {},
+    });
+  }
+
+  // Restore connections from version
+  for (const conn of version.flowData.connections) {
+    await db.insert(uiConnections).values({
+      flowId,
+      connectionId: conn.connectionId,
+      sourceFrameId: conn.sourceFrameId,
+      targetFrameId: conn.targetFrameId,
+      label: conn.label,
+      type: conn.type,
+    });
+  }
+
+  // Update flow metadata
+  await db
+    .update(uiFlows)
+    .set({
+      name: version.name,
+      description: version.description,
+      mermaidDiagram: version.mermaidDiagram,
+    })
+    .where(eq(uiFlows.id, flowId));
+
+  return getUiFlowById(flowId, userId);
+}
+
+export async function deleteVectorEmbeddingsByAgentId(agentId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.delete(vectorEmbeddings).where(eq(vectorEmbeddings.agentId, agentId));
 }

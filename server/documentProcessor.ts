@@ -10,6 +10,7 @@ import * as path from "path";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let pdfParse: any = null;
 let mammoth: typeof import("mammoth") | null = null;
+let officeparser: typeof import("officeparser") | null = null;
 
 /**
  * Initialize optional dependencies
@@ -30,6 +31,13 @@ async function initDependencies() {
       console.warn("[DocumentProcessor] mammoth not available");
     }
   }
+  if (!officeparser) {
+    try {
+      officeparser = await import("officeparser");
+    } catch {
+      console.warn("[DocumentProcessor] officeparser not available");
+    }
+  }
 }
 
 /**
@@ -41,7 +49,9 @@ export type SupportedFileType =
   | "application/pdf"
   | "text/csv"
   | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  | "application/vnd.ms-powerpoint";
 
 /**
  * File type detection result
@@ -75,6 +85,8 @@ const ALLOWED_EXTENSIONS = new Set([
   ".csv",
   ".docx",
   ".xlsx",
+  ".pptx",
+  ".ppt",
 ]);
 
 /**
@@ -171,6 +183,44 @@ export async function validateFileType(
     };
   }
 
+  if (extension === ".pptx") {
+    // PPTX uses the same ZIP signature as DOCX/XLSX
+    if (matchesMagicBytes(buffer, FILE_SIGNATURES.docx)) {
+      return {
+        isValid: true,
+        detectedType:
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        extension,
+        message: "Valid PPTX file",
+      };
+    }
+    return {
+      isValid: false,
+      detectedType: null,
+      extension,
+      message: "File does not appear to be a valid PPTX",
+    };
+  }
+
+  if (extension === ".ppt") {
+    // Legacy PPT files use OLE Compound Document format (D0 CF 11 E0 A1 B1 1A E1)
+    const oleSignature = { bytes: [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] };
+    if (matchesMagicBytes(buffer, oleSignature)) {
+      return {
+        isValid: true,
+        detectedType: "application/vnd.ms-powerpoint",
+        extension,
+        message: "Valid PPT file",
+      };
+    }
+    return {
+      isValid: false,
+      detectedType: null,
+      extension,
+      message: "File does not appear to be a valid PPT",
+    };
+  }
+
   return {
     isValid: false,
     detectedType: null,
@@ -245,6 +295,25 @@ export async function extractDocxText(buffer: Buffer): Promise<string> {
   } catch (error) {
     console.error("[DocumentProcessor] DOCX extraction error:", error);
     throw new Error(`Failed to extract text from DOCX: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * Extract text from PowerPoint (PPTX/PPT)
+ */
+export async function extractPptText(buffer: Buffer): Promise<string> {
+  await initDependencies();
+
+  if (!officeparser) {
+    throw new Error("officeparser library not available");
+  }
+
+  try {
+    const ast = await officeparser.OfficeParser.parseOffice(buffer);
+    return ast.toText();
+  } catch (error) {
+    console.error("[DocumentProcessor] PPT extraction error:", error);
+    throw new Error(`Failed to extract text from PowerPoint: ${(error as Error).message}`);
   }
 }
 
@@ -332,6 +401,11 @@ export async function processDocument(
       case ".docx":
         text = await extractDocxText(content);
         metadata.extractionMethod = "mammoth";
+        break;
+      case ".pptx":
+      case ".ppt":
+        text = await extractPptText(content);
+        metadata.extractionMethod = "officeparser";
         break;
       default:
         text = content.toString("utf8");

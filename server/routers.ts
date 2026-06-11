@@ -515,11 +515,13 @@ const ragRouter = router({
         'text/csv',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint',
       ];
-      const allowedExtensions = /\.(txt|md|pdf|csv|docx|xlsx)$/i;
+      const allowedExtensions = /\.(txt|md|pdf|csv|docx|xlsx|pptx|ppt)$/i;
       
       if (!allowedTypes.includes(input.fileType) && !input.fileName.match(allowedExtensions)) {
-        throw new Error("Invalid file type. Only .txt, .md, .pdf, .csv, .docx, and .xlsx files are allowed.");
+        throw new Error("Invalid file type. Only .txt, .md, .pdf, .csv, .docx, .xlsx, .pptx, and .ppt files are allowed.");
       }
       
       // Validate content size (10MB limit)
@@ -572,6 +574,227 @@ const ragRouter = router({
     .mutation(async ({ ctx, input }) => {
       await processDocumentForRAG(input.documentId, input.agentId, input.content);
       return { success: true };
+    }),
+
+  // Get document versions
+  getDocumentVersions: protectedProcedure
+    .input(z.object({ documentId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return db.getDocumentVersions(input.documentId);
+    }),
+
+  // Update document with versioning
+  updateDocument: protectedProcedure
+    .input(z.object({
+      documentId: z.number(),
+      content: z.string(),
+      changeDescription: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const document = await db.updateDocumentWithVersion(
+        input.documentId,
+        ctx.user.id,
+        {
+          content: input.content,
+          changeDescription: input.changeDescription,
+        }
+      );
+      
+      if (!document) {
+        throw new Error("Document not found or unauthorized");
+      }
+      
+      // Reprocess document with new content
+      await processDocumentForRAG(document.id, document.agentId, input.content);
+      
+      return document;
+    }),
+
+  // Revert document to a previous version
+  revertDocument: protectedProcedure
+    .input(z.object({
+      documentId: z.number(),
+      targetVersion: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const document = await db.revertDocumentToVersion(
+        input.documentId,
+        ctx.user.id,
+        input.targetVersion
+      );
+      
+      if (!document) {
+        throw new Error("Document or version not found");
+      }
+      
+      // Reprocess document
+      await processDocumentForRAG(document.id, document.agentId, document.content);
+      
+      return document;
+    }),
+
+  // Bulk upload multiple documents
+  uploadDocuments: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      documents: z.array(z.object({
+        fileName: z.string(),
+        fileType: z.string(),
+        fileSize: z.number().optional(),
+        content: z.string(),
+      })).min(1).max(20), // Allow 1-20 documents at once
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const allowedTypes = [
+        'text/plain',
+        'text/markdown',
+        'application/pdf',
+        'text/csv',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint',
+      ];
+      const allowedExtensions = /\.(txt|md|pdf|csv|docx|xlsx|pptx|ppt)$/i;
+
+      const results: Array<{ fileName: string; success: boolean; documentId?: number; error?: string }> = [];
+
+      for (const doc of input.documents) {
+        try {
+          // Validate file type
+          if (!allowedTypes.includes(doc.fileType) && !doc.fileName.match(allowedExtensions)) {
+            results.push({ fileName: doc.fileName, success: false, error: "Invalid file type" });
+            continue;
+          }
+
+          // Validate content size
+          const contentSizeBytes = Buffer.byteLength(doc.content, 'utf8');
+          if (contentSizeBytes > 10 * 1024 * 1024) {
+            results.push({ fileName: doc.fileName, success: false, error: "File exceeds 10MB limit" });
+            continue;
+          }
+
+          // Create document
+          const document = await db.createTrainingDocument({
+            agentId: input.agentId,
+            userId: ctx.user.id,
+            fileName: doc.fileName,
+            fileType: doc.fileType,
+            fileSize: doc.fileSize,
+            content: doc.content,
+            status: "pending",
+            chunkCount: 0,
+          });
+
+          // Process document
+          try {
+            await processDocumentForRAG(document.id, input.agentId, doc.content);
+            results.push({ fileName: doc.fileName, success: true, documentId: document.id });
+          } catch (procError) {
+            console.error("Error processing document:", procError);
+            // Document was uploaded but embedding generation failed - user can manually reprocess later
+            results.push({ fileName: doc.fileName, success: true, documentId: document.id, error: "Uploaded but processing failed" });
+          }
+        } catch (error) {
+          results.push({ fileName: doc.fileName, success: false, error: (error as Error).message });
+        }
+      }
+
+      return { results, totalUploaded: results.filter(r => r.success).length };
+    }),
+
+  // Get document with preview content
+  getDocument: protectedProcedure
+    .input(z.object({ documentId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const document = await db.getTrainingDocumentById(input.documentId, ctx.user.id);
+      if (!document) {
+        throw new Error("Document not found");
+      }
+      
+      // Get chunks for this document
+      const chunks = await db.getVectorEmbeddingsByDocumentId(input.documentId);
+      
+      return {
+        ...document,
+        chunks: chunks.map(c => ({
+          id: c.id,
+          chunkIndex: c.chunkIndex,
+          content: c.content,
+          metadata: c.metadata,
+        })),
+        preview: document.content.slice(0, 2000) + (document.content.length > 2000 ? "..." : ""),
+      };
+    }),
+
+  // Search within documents
+  searchDocuments: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      query: z.string().min(1).max(500),
+      limit: z.number().min(1).max(50).optional().default(20),
+    }))
+    .query(async ({ ctx, input }) => {
+      // Full-text search across document contents
+      const results = await db.searchTrainingDocuments(
+        input.agentId,
+        ctx.user.id,
+        input.query,
+        input.limit
+      );
+      
+      return results;
+    }),
+
+  // Search within document chunks (semantic search)
+  searchChunks: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      query: z.string().min(1).max(500),
+      limit: z.number().min(1).max(20).optional().default(10),
+    }))
+    .query(async ({ ctx, input }) => {
+      // Use RAG retrieval for semantic search
+      const context = await retrieveRelevantContext(input.agentId, input.query);
+      
+      if (!context) {
+        return { results: [], message: "No relevant chunks found" };
+      }
+      
+      // Get the scored embeddings for display
+      const config = await db.getOrCreateRagConfig(input.agentId);
+      const embeddings = await db.getVectorEmbeddingsByAgentId(input.agentId);
+      
+      // Create embedding for the query
+      const { createEmbedding, cosineSimilarity } = await import("./embeddings");
+      const queryEmbedding = await createEmbedding(input.query);
+      
+      // Calculate similarity scores and return top results
+      const scoredResults = embeddings
+        .map(embedding => {
+          if (!embedding.embedding || !Array.isArray(embedding.embedding)) {
+            return { embedding, score: 0 };
+          }
+          const score = cosineSimilarity(queryEmbedding, embedding.embedding);
+          return { embedding, score };
+        })
+        .filter(item => {
+          const threshold = parseFloat(config.similarityThreshold || "0.5");
+          return item.score >= threshold;
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, input.limit);
+      
+      return {
+        results: scoredResults.map(r => ({
+          id: r.embedding.id,
+          documentId: r.embedding.documentId,
+          chunkIndex: r.embedding.chunkIndex,
+          content: r.embedding.content,
+          score: Math.round(r.score * 100) / 100,
+          metadata: r.embedding.metadata,
+        })),
+      };
     }),
 });
 
@@ -722,6 +945,53 @@ const uiFlowRouter = router({
     .mutation(async ({ ctx, input }) => {
       await db.deleteUiConnection(input.id, input.flowId);
       return { success: true };
+    }),
+
+  // Get flow versions
+  getVersions: protectedProcedure
+    .input(z.object({ flowId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return db.getUiFlowVersions(input.flowId);
+    }),
+
+  // Save current flow state as a version
+  saveVersion: protectedProcedure
+    .input(z.object({
+      flowId: z.number(),
+      changeDescription: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const version = await db.saveUiFlowVersion(
+        input.flowId,
+        ctx.user.id,
+        input.changeDescription
+      );
+      
+      if (!version) {
+        throw new Error("Failed to save flow version");
+      }
+      
+      return version;
+    }),
+
+  // Revert flow to a previous version
+  revertToVersion: protectedProcedure
+    .input(z.object({
+      flowId: z.number(),
+      targetVersion: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const flow = await db.revertUiFlowToVersion(
+        input.flowId,
+        ctx.user.id,
+        input.targetVersion
+      );
+      
+      if (!flow) {
+        throw new Error("Flow or version not found");
+      }
+      
+      return flow;
     }),
 });
 

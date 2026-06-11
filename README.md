@@ -14,10 +14,14 @@ A comprehensive dashboard for building, managing, and analyzing AI chatbots with
 ### 📚 RAG Training System
 Train your chatbots with custom knowledge bases using Retrieval-Augmented Generation (RAG):
 
-- **Document Upload**: Support for `.txt`, `.md`, `.pdf`, and `.csv` files (up to 10MB)
-- **Smart Chunking**: Configurable chunk sizes (128-2048 characters) with overlap
+- **Document Upload**: Support for `.txt`, `.md`, `.pdf`, `.csv`, `.docx`, `.xlsx`, `.pptx`, `.ppt` files (up to 10MB)
+- **Bulk Upload**: Upload up to 20 documents at once
+- **Smart Chunking**: Configurable chunk sizes (128-2048 characters) with multiple strategies
 - **Vector Embeddings**: Automatic generation and storage of document embeddings
 - **Semantic Search**: Retrieve relevant context using similarity search
+- **Full-Text Search**: Search across all document contents
+- **Document Preview**: View document content, chunks, and processing status
+- **Version History**: Track document changes and revert to previous versions
 - **Configuration Options**:
   - Enable/disable RAG per agent
   - Adjust chunk size and overlap
@@ -28,14 +32,18 @@ Train your chatbots with custom knowledge bases using Retrieval-Augmented Genera
 
 1. Navigate to an agent's detail page
 2. Click on the **RAG Training** tab
-3. Upload training documents using the upload button
+3. Upload training documents:
+   - Use **Upload** for single files
+   - Use **Bulk Upload** for multiple files (up to 20)
 4. Configure RAG settings:
    - Toggle RAG on/off
    - Adjust chunk size for optimal context windows
    - Set how many chunks to retrieve (top-K)
    - Set minimum similarity score threshold
 5. Documents are automatically processed and chunked
-6. The agent will use this knowledge when responding to queries
+6. Use the **Search** tab to find content across documents
+7. Click the **Preview** icon to view document details and chunks
+8. The agent will use this knowledge when responding to queries
 
 ### 🎨 UI Flow Builder (Tempo AI-style)
 Design conversational flows visually with an interactive canvas:
@@ -341,12 +349,14 @@ npm run check
 ## Future Enhancements
 
 ### RAG System
-- [x] Support for more document formats (DOCX, XLSX)
-- [ ] Advanced chunking strategies (semantic, recursive)
-- [ ] Multiple embedding models support
+- [x] Support for more document formats (DOCX, XLSX, PPTX, PPT)
+- [x] Advanced chunking strategies (sentence, paragraph, semantic)
+- [x] Multiple embedding models support
+- [x] Document versioning and updates
+- [x] Bulk document upload
+- [x] Document preview and search
 - [ ] Vector database integration (Pinecone, Weaviate)
 - [ ] Real-time embedding generation with progress tracking
-- [ ] Document versioning and updates
 
 ### UI Flow Builder
 - [ ] Component library for common UI patterns
