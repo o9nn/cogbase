@@ -15,6 +15,7 @@ import UiFlows from "./pages/UiFlows";
 import UiFlowCanvas from "./pages/UiFlowCanvas";
 import Webhooks from "./pages/Webhooks";
 import VectorDbSettings from "./pages/VectorDbSettings";
+import AuditLogs from "./pages/AuditLogs";
 import DashboardLayout from "./components/DashboardLayout";
 import { useAuth } from "./_core/hooks/useAuth";
 
@@ -32,6 +33,7 @@ function AuthenticatedRoutes() {
         <Route path="/ui-flows/:id" component={UiFlowCanvas} />
         <Route path="/webhooks" component={Webhooks} />
         <Route path="/vector-db" component={VectorDbSettings} />
+        <Route path="/audit-logs" component={AuditLogs} />
         <Route path="/settings" component={Settings} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />

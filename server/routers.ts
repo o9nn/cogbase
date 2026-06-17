@@ -9,6 +9,7 @@ import { notifyOwner } from "./_core/notification";
 import { nanoid } from "nanoid";
 import * as db from "./db";
 import { retrieveRelevantContext, buildAugmentedPrompt, processDocumentForRAG } from "./rag";
+import * as flowExecutor from "./flowExecutor";
 
 // ============ AGENT ROUTER ============
 const agentRouter = router({
@@ -266,6 +267,129 @@ const chatRouter = router({
       return {
         sessionId,
         message: assistantMessage,
+      };
+    }),
+
+  // Start a flow-based conversation
+  startFlow: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      flowId: z.number(),
+      sessionId: z.number().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Get or create session
+      let sessionId = input.sessionId;
+      if (!sessionId) {
+        const session = await db.createChatSession({
+          agentId: input.agentId,
+          userId: ctx.user.id,
+          title: "Flow Conversation",
+        });
+        sessionId = session.id;
+      }
+
+      // Verify the agent exists and belongs to user
+      const agent = await db.getAgentById(input.agentId, ctx.user.id);
+      if (!agent) {
+        throw new Error("Agent not found");
+      }
+
+      // Start the flow
+      const sessionKey = `${ctx.user.id}-${sessionId}`;
+      const response = await flowExecutor.startFlow(input.flowId, sessionKey);
+      
+      if (!response) {
+        throw new Error("Failed to start flow - flow may be empty or not found");
+      }
+
+      // Save the flow response as a system message
+      await db.createChatMessage({
+        sessionId,
+        role: "assistant",
+        content: response.content,
+      });
+
+      return {
+        sessionId,
+        response,
+        hasActiveFlow: true,
+      };
+    }),
+
+  // Send a message to an active flow
+  sendFlowMessage: protectedProcedure
+    .input(z.object({
+      sessionId: z.number(),
+      message: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const sessionKey = `${ctx.user.id}-${input.sessionId}`;
+      
+      // Check if there's an active flow
+      if (!flowExecutor.hasActiveFlow(sessionKey)) {
+        throw new Error("No active flow for this session");
+      }
+
+      // Save user message
+      await db.createChatMessage({
+        sessionId: input.sessionId,
+        role: "user",
+        content: input.message,
+      });
+
+      // Process the input through the flow
+      const response = await flowExecutor.processFlowInput(sessionKey, input.message);
+      
+      if (!response) {
+        // Flow ended or error
+        flowExecutor.endFlow(sessionKey);
+        return {
+          response: {
+            type: "end",
+            content: "The conversation flow has ended.",
+          },
+          hasActiveFlow: false,
+        };
+      }
+
+      // Save flow response
+      await db.createChatMessage({
+        sessionId: input.sessionId,
+        role: "assistant",
+        content: response.content,
+      });
+
+      return {
+        response,
+        hasActiveFlow: response.type !== "end",
+      };
+    }),
+
+  // Check if a session has an active flow
+  hasActiveFlow: protectedProcedure
+    .input(z.object({ sessionId: z.number() }))
+    .query(({ ctx, input }) => {
+      const sessionKey = `${ctx.user.id}-${input.sessionId}`;
+      return flowExecutor.hasActiveFlow(sessionKey);
+    }),
+
+  // End an active flow
+  endFlow: protectedProcedure
+    .input(z.object({ sessionId: z.number() }))
+    .mutation(({ ctx, input }) => {
+      const sessionKey = `${ctx.user.id}-${input.sessionId}`;
+      flowExecutor.endFlow(sessionKey);
+      return { success: true };
+    }),
+
+  // Get flow execution stats (admin)
+  getFlowStats: protectedProcedure
+    .query(() => {
+      const stats = flowExecutor.getFlowStats();
+      return {
+        activeSessions: stats.activeSessions,
+        flowsInUse: Array.from(stats.flowsInUse),
       };
     }),
 });
