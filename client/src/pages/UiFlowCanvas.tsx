@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, Plus, Trash2, Move, Link2, Save, Eye, EyeOff, Download } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Move, Link2, Save, Eye, EyeOff, Download, Library, ChevronLeft, ChevronRight, MessageSquare, Type, Image, Layout, Smartphone, Grip } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { toast } from "sonner";
@@ -23,6 +23,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 interface Frame {
   id: string;
@@ -68,8 +75,10 @@ export default function UiFlowCanvas() {
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [mermaidCode, setMermaidCode] = useState("");
+  const [showComponentLibrary, setShowComponentLibrary] = useState(true);
 
   const { data: flow, isLoading } = trpc.uiFlow.get.useQuery({ id: flowId });
+  const { data: frameTemplates } = trpc.template.listFrameTemplates.useQuery();
   const utils = trpc.useUtils();
 
   const createFrameMutation = trpc.uiFlow.createFrame.useMutation({
@@ -171,6 +180,35 @@ export default function UiFlowCanvas() {
       width: newFrame.width,
       height: newFrame.height,
     });
+  };
+
+  const handleAddFrameFromTemplate = (template: { id: number; name: string; type: string; category: string; defaultConfig: Record<string, unknown> }) => {
+    const newFrame: Frame = {
+      id: `frame-${Date.now()}`,
+      name: template.name,
+      x: 100 + frames.length * 50,
+      y: 100 + frames.length * 50,
+      width: 300,
+      height: 200,
+      type: template.type,
+    };
+
+    setFrames([...frames, newFrame]);
+
+    // Save to backend
+    createFrameMutation.mutate({
+      flowId,
+      frameId: newFrame.id,
+      name: newFrame.name,
+      type: newFrame.type,
+      positionX: newFrame.x,
+      positionY: newFrame.y,
+      width: newFrame.width,
+      height: newFrame.height,
+      config: JSON.stringify(template.defaultConfig),
+    });
+    
+    toast.success(`Added ${template.name} from template`);
   };
 
   const handleFrameMouseDown = (frameId: string, e: React.MouseEvent) => {
@@ -510,56 +548,152 @@ export default function UiFlowCanvas() {
         </div>
       </div>
 
-      {/* Canvas */}
-      <div className="flex-1 relative overflow-auto bg-muted/20">
-        <div
-          ref={canvasRef}
-          className={`absolute inset-0 ${showGrid ? "bg-[linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(to_right,#e5e7eb_1px,transparent_1px)] bg-[size:20px_20px]" : ""}`}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onClick={() => {
-            if (isConnecting) {
-              setIsConnecting(false);
-              setConnectingFrom(null);
-            }
-          }}
-        >
-          {/* Connection Lines */}
-          <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: 1 }}>
-            {connections.map((conn) => {
-              const source = frames.find((f) => f.id === conn.sourceId);
-              const target = frames.find((f) => f.id === conn.targetId);
-              if (!source || !target) return null;
+      {/* Canvas with Component Library */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Component Library Sidebar */}
+        {showComponentLibrary && (
+          <div className="w-64 border-r bg-background flex flex-col">
+            <div className="p-3 border-b flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Library className="w-4 h-4 text-primary" />
+                <span className="font-medium text-sm">Components</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => setShowComponentLibrary(false)}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+            </div>
+            <ScrollArea className="flex-1">
+              <Accordion type="multiple" defaultValue={["messages", "inputs", "display", "screens"]} className="px-2">
+                {["messages", "inputs", "display", "media", "screens"].map((category) => {
+                  const templates = frameTemplates?.filter((t) => t.category === category) || [];
+                  if (templates.length === 0) return null;
+                  
+                  const getCategoryIcon = (cat: string) => {
+                    switch (cat) {
+                      case "messages": return <MessageSquare className="w-4 h-4" />;
+                      case "inputs": return <Type className="w-4 h-4" />;
+                      case "display": return <Layout className="w-4 h-4" />;
+                      case "media": return <Image className="w-4 h-4" />;
+                      case "screens": return <Smartphone className="w-4 h-4" />;
+                      default: return <Grip className="w-4 h-4" />;
+                    }
+                  };
 
-              const x1 = source.x + source.width / 2;
-              const y1 = source.y + source.height / 2;
-              const x2 = target.x + target.width / 2;
-              const y2 = target.y + target.height / 2;
+                  return (
+                    <AccordionItem key={category} value={category}>
+                      <AccordionTrigger className="text-sm py-2">
+                        <div className="flex items-center gap-2">
+                          {getCategoryIcon(category)}
+                          <span className="capitalize">{category}</span>
+                          <Badge variant="secondary" className="ml-auto text-xs">
+                            {templates.length}
+                          </Badge>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-1 pb-2">
+                          {templates.map((template) => (
+                            <Button
+                              key={template.id}
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start text-xs h-8"
+                              onClick={() => handleAddFrameFromTemplate({
+                                id: template.id,
+                                name: template.name,
+                                type: template.type,
+                                category: template.category,
+                                defaultConfig: template.defaultConfig ? JSON.parse(template.defaultConfig) : {},
+                              })}
+                            >
+                              <Plus className="w-3 h-3 mr-2" />
+                              {template.name}
+                            </Button>
+                          ))}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
+              
+              {(!frameTemplates || frameTemplates.length === 0) && (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  <p>No component templates available.</p>
+                  <p className="text-xs mt-1">Templates will appear here once seeded.</p>
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        )}
+        
+        {/* Toggle button when library is hidden */}
+        {!showComponentLibrary && (
+          <Button
+            variant="outline"
+            size="icon"
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-8 w-8"
+            onClick={() => setShowComponentLibrary(true)}
+          >
+            <ChevronRight className="w-4 h-4" />
+          </Button>
+        )}
 
-              return (
-                <g key={conn.id}>
-                  <line
-                    x1={x1}
-                    y1={y1}
-                    x2={x2}
-                    y2={y2}
-                    stroke="hsl(var(--primary))"
-                    strokeWidth="2"
-                    markerEnd="url(#arrowhead)"
-                  />
-                  <circle
-                    cx={(x1 + x2) / 2}
-                    cy={(y1 + y2) / 2}
-                    r="10"
-                    fill="hsl(var(--background))"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth="2"
-                    className="cursor-pointer pointer-events-auto"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteConnection(conn.id);
-                    }}
-                  />
+        {/* Main Canvas Area */}
+        <div className="flex-1 relative overflow-auto bg-muted/20">
+          <div
+            ref={canvasRef}
+            className={`absolute inset-0 ${showGrid ? "bg-[linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(to_right,#e5e7eb_1px,transparent_1px)] bg-[size:20px_20px]" : ""}`}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onClick={() => {
+              if (isConnecting) {
+                setIsConnecting(false);
+                setConnectingFrom(null);
+              }
+            }}
+          >
+            {/* Connection Lines */}
+            <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: 1 }}>
+              {connections.map((conn) => {
+                const source = frames.find((f) => f.id === conn.sourceId);
+                const target = frames.find((f) => f.id === conn.targetId);
+                if (!source || !target) return null;
+
+                const x1 = source.x + source.width / 2;
+                const y1 = source.y + source.height / 2;
+                const x2 = target.x + target.width / 2;
+                const y2 = target.y + target.height / 2;
+
+                return (
+                  <g key={conn.id}>
+                    <line
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
+                      stroke="hsl(var(--primary))"
+                      strokeWidth="2"
+                      markerEnd="url(#arrowhead)"
+                    />
+                    <circle
+                      cx={(x1 + x2) / 2}
+                      cy={(y1 + y2) / 2}
+                      r="10"
+                      fill="hsl(var(--background))"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth="2"
+                      className="cursor-pointer pointer-events-auto"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteConnection(conn.id);
+                      }}
+                    />
                   <text
                     x={(x1 + x2) / 2}
                     y={(y1 + y2) / 2}
@@ -667,6 +801,7 @@ export default function UiFlowCanvas() {
             </div>
           )}
         </div>
+      </div>
       </div>
 
       {/* Status Bar */}

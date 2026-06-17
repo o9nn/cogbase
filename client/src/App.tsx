@@ -13,6 +13,8 @@ import Playground from "./pages/Playground";
 import Settings from "./pages/Settings";
 import UiFlows from "./pages/UiFlows";
 import UiFlowCanvas from "./pages/UiFlowCanvas";
+import Webhooks from "./pages/Webhooks";
+import VectorDbSettings from "./pages/VectorDbSettings";
 import DashboardLayout from "./components/DashboardLayout";
 import { useAuth } from "./_core/hooks/useAuth";
 
@@ -28,6 +30,8 @@ function AuthenticatedRoutes() {
         <Route path="/agents/:id/playground" component={Playground} />
         <Route path="/ui-flows" component={UiFlows} />
         <Route path="/ui-flows/:id" component={UiFlowCanvas} />
+        <Route path="/webhooks" component={Webhooks} />
+        <Route path="/vector-db" component={VectorDbSettings} />
         <Route path="/settings" component={Settings} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
