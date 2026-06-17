@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, sql, count, avg } from "drizzle-orm";
+import { eq, desc, and, gte, lte, sql, count, avg, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
   InsertUser, users, 
@@ -1054,7 +1054,9 @@ export async function getAuditLogs(
   userId?: number,
   startDate?: Date,
   endDate?: Date,
-  limit: number = 100
+  action?: string,
+  limit: number = 100,
+  offset: number = 0
 ): Promise<AuditLog[]> {
   const db = await getDb();
   if (!db) return [];
@@ -1070,11 +1072,15 @@ export async function getAuditLogs(
   if (endDate) {
     conditions.push(lte(auditLogs.createdAt, endDate));
   }
+  if (action) {
+    conditions.push(like(auditLogs.action, `${action}%`));
+  }
 
   const query = db.select()
     .from(auditLogs)
     .orderBy(desc(auditLogs.createdAt))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 
   if (conditions.length > 0) {
     return query.where(and(...conditions));

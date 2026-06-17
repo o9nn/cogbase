@@ -1512,12 +1512,14 @@ const auditLogRouter = router({
     .input(z.object({
       startDate: z.string().optional(),
       endDate: z.string().optional(),
+      action: z.string().optional(),
       limit: z.number().min(1).max(100).optional().default(50),
+      offset: z.number().min(0).optional().default(0),
     }).optional())
     .query(async ({ ctx, input }) => {
       const startDate = input?.startDate ? new Date(input.startDate) : undefined;
       const endDate = input?.endDate ? new Date(input.endDate) : undefined;
-      return db.getAuditLogs(ctx.user.id, startDate, endDate);
+      return db.getAuditLogs(ctx.user.id, startDate, endDate, input?.action, input?.limit, input?.offset);
     }),
 });
 

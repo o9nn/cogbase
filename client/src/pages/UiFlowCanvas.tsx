@@ -205,7 +205,7 @@ export default function UiFlowCanvas() {
       positionY: newFrame.y,
       width: newFrame.width,
       height: newFrame.height,
-      config: JSON.stringify(template.defaultConfig),
+      config: template.defaultConfig,
     });
     
     toast.success(`Added ${template.name} from template`);
