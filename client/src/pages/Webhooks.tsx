@@ -254,7 +254,7 @@ export default function Webhooks() {
                           Inactive
                         </Badge>
                       )}
-                      {webhook.failureCount > 0 && (
+                      {(webhook.failureCount ?? 0) > 0 && (
                         <Badge variant="destructive">
                           <AlertCircle className="w-3 h-3 mr-1" />
                           {webhook.failureCount} failures

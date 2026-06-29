@@ -420,7 +420,7 @@ export default function AgentDetail() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setRevertVersionId(version.id)}
+                            onClick={() => setRevertVersionId(version.version)}
                           >
                             <RotateCcw className="w-3 h-3 mr-1" />
                             Restore
@@ -459,7 +459,7 @@ export default function AgentDetail() {
             <AlertDialogAction
               onClick={() => {
                 if (revertVersionId) {
-                  revertMutation.mutate({ versionId: revertVersionId });
+                  revertMutation.mutate({ agentId, targetVersion: revertVersionId });
                 }
               }}
             >
