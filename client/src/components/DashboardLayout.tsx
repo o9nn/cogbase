@@ -34,7 +34,10 @@ import {
   Bell,
   Zap,
   ChevronRight,
-  Layers
+  Layers,
+  Webhook,
+  Database,
+  FileText
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "wouter";
@@ -47,6 +50,9 @@ const mainMenuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
   { icon: Bot, label: "Agents", path: "/agents" },
   { icon: Layers, label: "UI Flows", path: "/ui-flows" },
+  { icon: Webhook, label: "Webhooks", path: "/webhooks" },
+  { icon: Database, label: "Vector DB", path: "/vector-db" },
+  { icon: FileText, label: "Audit Logs", path: "/audit-logs" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];
 

@@ -14,12 +14,23 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, Bot, Save, RefreshCw, PlayCircle, MessageSquare, BarChart3, Trash2, Plus, X } from "lucide-react";
+import { ArrowLeft, Bot, Save, RefreshCw, PlayCircle, MessageSquare, BarChart3, Trash2, Plus, X, History, RotateCcw, Clock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { RagTraining } from "@/components/RagTraining";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function AgentDetail() {
   const params = useParams<{ id: string }>();
@@ -27,6 +38,7 @@ export default function AgentDetail() {
   const [, setLocation] = useLocation();
 
   const { data: agent, isLoading } = trpc.agent.get.useQuery({ id: agentId });
+  const { data: versions } = trpc.agentVersion.list.useQuery({ agentId });
   const utils = trpc.useUtils();
 
   const [name, setName] = useState("");
@@ -38,6 +50,7 @@ export default function AgentDetail() {
   const [conversationStarters, setConversationStarters] = useState<string[]>([]);
   const [newStarter, setNewStarter] = useState("");
   const [status, setStatus] = useState<"active" | "inactive" | "training">("active");
+  const [revertVersionId, setRevertVersionId] = useState<number | null>(null);
 
   useEffect(() => {
     if (agent) {
@@ -70,6 +83,18 @@ export default function AgentDetail() {
     },
     onError: (error) => {
       toast.error(error.message || "Failed to train agent");
+    },
+  });
+
+  const revertMutation = trpc.agentVersion.revert.useMutation({
+    onSuccess: () => {
+      toast.success("Agent reverted to previous version");
+      setRevertVersionId(null);
+      utils.agent.get.invalidate({ id: agentId });
+      utils.agentVersion.list.invalidate({ agentId });
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to revert agent");
     },
   });
 
@@ -171,6 +196,10 @@ export default function AgentDetail() {
           <TabsTrigger value="model">Model Settings</TabsTrigger>
           <TabsTrigger value="starters">Conversation Starters</TabsTrigger>
           <TabsTrigger value="rag">RAG Training</TabsTrigger>
+          <TabsTrigger value="versions">
+            <History className="w-4 h-4 mr-1" />
+            Version History
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
@@ -339,7 +368,106 @@ export default function AgentDetail() {
         <TabsContent value="rag" className="space-y-4">
           <RagTraining agentId={agentId} />
         </TabsContent>
+
+        <TabsContent value="versions" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <History className="w-5 h-5" />
+                Version History
+              </CardTitle>
+              <CardDescription>
+                View and restore previous versions of your agent configuration
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {versions && versions.length > 0 ? (
+                <ScrollArea className="h-[400px]">
+                  <div className="space-y-4">
+                    {versions.map((version, index) => (
+                      <div
+                        key={version.id}
+                        className="flex items-start justify-between p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="mt-1">
+                            <Clock className="w-4 h-4 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">
+                                Version {versions.length - index}
+                              </span>
+                              {index === 0 && (
+                                <Badge variant="secondary">Current</Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              {new Date(version.createdAt).toLocaleString()}
+                            </p>
+                            {version.changeDescription && (
+                              <p className="text-sm mt-2">{version.changeDescription}</p>
+                            )}
+                            <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                              <span>Model: {version.model || "Unknown"}</span>
+                              <span>
+                                System Prompt: {version.systemPrompt?.length || 0} chars
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        {index > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setRevertVersionId(version.id)}
+                          >
+                            <RotateCcw className="w-3 h-3 mr-1" />
+                            Restore
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground">
+                  <History className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>No version history yet</p>
+                  <p className="text-sm">
+                    Versions are automatically created when you save changes
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      {/* Revert Version Confirmation Dialog */}
+      <AlertDialog open={revertVersionId !== null} onOpenChange={() => setRevertVersionId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restore Previous Version</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will restore the agent configuration to the selected version.
+              Your current configuration will be saved as a new version before restoring.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (revertVersionId) {
+                  revertMutation.mutate({ versionId: revertVersionId });
+                }
+              }}
+            >
+              Restore Version
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Agent Info */}
       <Card>

@@ -9,6 +9,7 @@ import { notifyOwner } from "./_core/notification";
 import { nanoid } from "nanoid";
 import * as db from "./db";
 import { retrieveRelevantContext, buildAugmentedPrompt, processDocumentForRAG } from "./rag";
+import * as flowExecutor from "./flowExecutor";
 
 // ============ AGENT ROUTER ============
 const agentRouter = router({
@@ -79,6 +80,35 @@ const agentRouter = router({
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
       return db.trainAgent(input.id, ctx.user.id);
+    }),
+
+  // Attach a UI flow to an agent
+  attachFlow: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      flowId: z.number().nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const agent = await db.attachFlowToAgent(input.agentId, ctx.user.id, input.flowId);
+      if (!agent) {
+        throw new Error("Failed to attach flow to agent");
+      }
+      return agent;
+    }),
+
+  // Get the attached flow ID for an agent
+  getAttachedFlow: protectedProcedure
+    .input(z.object({ agentId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const agent = await db.getAgentById(input.agentId, ctx.user.id);
+      if (!agent) {
+        throw new Error("Agent not found");
+      }
+      const flowId = db.getAttachedFlowId(agent);
+      if (!flowId) {
+        return null;
+      }
+      return db.getUiFlowById(flowId, ctx.user.id);
     }),
 });
 
@@ -237,6 +267,129 @@ const chatRouter = router({
       return {
         sessionId,
         message: assistantMessage,
+      };
+    }),
+
+  // Start a flow-based conversation
+  startFlow: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      flowId: z.number(),
+      sessionId: z.number().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Get or create session
+      let sessionId = input.sessionId;
+      if (!sessionId) {
+        const session = await db.createChatSession({
+          agentId: input.agentId,
+          userId: ctx.user.id,
+          title: "Flow Conversation",
+        });
+        sessionId = session.id;
+      }
+
+      // Verify the agent exists and belongs to user
+      const agent = await db.getAgentById(input.agentId, ctx.user.id);
+      if (!agent) {
+        throw new Error("Agent not found");
+      }
+
+      // Start the flow
+      const sessionKey = `${ctx.user.id}-${sessionId}`;
+      const response = await flowExecutor.startFlow(input.flowId, sessionKey);
+      
+      if (!response) {
+        throw new Error("Failed to start flow - flow may be empty or not found");
+      }
+
+      // Save the flow response as a system message
+      await db.createChatMessage({
+        sessionId,
+        role: "assistant",
+        content: response.content,
+      });
+
+      return {
+        sessionId,
+        response,
+        hasActiveFlow: true,
+      };
+    }),
+
+  // Send a message to an active flow
+  sendFlowMessage: protectedProcedure
+    .input(z.object({
+      sessionId: z.number(),
+      message: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const sessionKey = `${ctx.user.id}-${input.sessionId}`;
+      
+      // Check if there's an active flow
+      if (!flowExecutor.hasActiveFlow(sessionKey)) {
+        throw new Error("No active flow for this session");
+      }
+
+      // Save user message
+      await db.createChatMessage({
+        sessionId: input.sessionId,
+        role: "user",
+        content: input.message,
+      });
+
+      // Process the input through the flow
+      const response = await flowExecutor.processFlowInput(sessionKey, input.message);
+      
+      if (!response) {
+        // Flow ended or error
+        flowExecutor.endFlow(sessionKey);
+        return {
+          response: {
+            type: "end",
+            content: "The conversation flow has ended.",
+          },
+          hasActiveFlow: false,
+        };
+      }
+
+      // Save flow response
+      await db.createChatMessage({
+        sessionId: input.sessionId,
+        role: "assistant",
+        content: response.content,
+      });
+
+      return {
+        response,
+        hasActiveFlow: response.type !== "end",
+      };
+    }),
+
+  // Check if a session has an active flow
+  hasActiveFlow: protectedProcedure
+    .input(z.object({ sessionId: z.number() }))
+    .query(({ ctx, input }) => {
+      const sessionKey = `${ctx.user.id}-${input.sessionId}`;
+      return flowExecutor.hasActiveFlow(sessionKey);
+    }),
+
+  // End an active flow
+  endFlow: protectedProcedure
+    .input(z.object({ sessionId: z.number() }))
+    .mutation(({ ctx, input }) => {
+      const sessionKey = `${ctx.user.id}-${input.sessionId}`;
+      flowExecutor.endFlow(sessionKey);
+      return { success: true };
+    }),
+
+  // Get flow execution stats (admin)
+  getFlowStats: protectedProcedure
+    .query(() => {
+      const stats = flowExecutor.getFlowStats();
+      return {
+        activeSessions: stats.activeSessions,
+        flowsInUse: Array.from(stats.flowsInUse),
       };
     }),
 });
@@ -1040,6 +1193,336 @@ const feedbackRouter = router({
     }),
 });
 
+// ============ TEMPLATE ROUTER ============
+const templateRouter = router({
+  // List flow templates
+  listFlowTemplates: protectedProcedure
+    .input(z.object({ category: z.string().optional() }).optional())
+    .query(async ({ input }) => {
+      return db.getFlowTemplates(input?.category);
+    }),
+
+  // Get a specific flow template
+  getFlowTemplate: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      return db.getFlowTemplate(input.id);
+    }),
+
+  // Create a flow from a template
+  createFlowFromTemplate: protectedProcedure
+    .input(z.object({
+      templateId: z.number(),
+      name: z.string().min(1).max(255),
+      description: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const flow = await db.createFlowFromTemplate(
+        input.templateId,
+        ctx.user.id,
+        input.name,
+        input.description
+      );
+      if (!flow) {
+        throw new Error("Failed to create flow from template");
+      }
+      return flow;
+    }),
+
+  // List frame templates (component library)
+  listFrameTemplates: protectedProcedure
+    .input(z.object({
+      category: z.string().optional(),
+      type: z.string().optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      return db.getFrameTemplates(input?.category, input?.type);
+    }),
+
+  // Get a specific frame template
+  getFrameTemplate: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      return db.getFrameTemplate(input.id);
+    }),
+
+  // Create frame from template
+  createFrameFromTemplate: protectedProcedure
+    .input(z.object({
+      templateId: z.number(),
+      flowId: z.number(),
+      positionX: z.number(),
+      positionY: z.number(),
+      name: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const template = await db.getFrameTemplate(input.templateId);
+      if (!template) {
+        throw new Error("Frame template not found");
+      }
+
+      // Increment usage
+      await db.incrementFrameTemplateUsage(input.templateId);
+
+      // Create frame with template defaults
+      const frameId = `frame-${nanoid(8)}`;
+      const defaultConfig = template.defaultConfig || { width: 300, height: 200 };
+      
+      return db.createUiFrame({
+        flowId: input.flowId,
+        frameId,
+        name: input.name || template.name,
+        type: template.type,
+        positionX: input.positionX,
+        positionY: input.positionY,
+        width: defaultConfig.width,
+        height: defaultConfig.height,
+        config: {
+          ...defaultConfig.style,
+          ...defaultConfig.properties,
+          templateId: input.templateId,
+        },
+      });
+    }),
+});
+
+// ============ WEBHOOK ROUTER ============
+const webhookRouter = router({
+  // List webhooks for user
+  list: protectedProcedure.query(async ({ ctx }) => {
+    return db.getWebhooksByUserId(ctx.user.id);
+  }),
+
+  // Get a specific webhook
+  get: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return db.getWebhookById(input.id, ctx.user.id);
+    }),
+
+  // Create a new webhook
+  create: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1).max(255),
+      url: z.string().url(),
+      agentId: z.number().optional(),
+      events: z.array(z.enum([
+        "message.received",
+        "message.sent",
+        "session.started",
+        "session.ended",
+        "feedback.submitted",
+      ])).min(1),
+      secret: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const secret = input.secret || `whsec_${nanoid(32)}`;
+      return db.createWebhook({
+        userId: ctx.user.id,
+        name: input.name,
+        url: input.url,
+        agentId: input.agentId,
+        events: input.events,
+        secret,
+        isActive: 1,
+      });
+    }),
+
+  // Update a webhook
+  update: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      name: z.string().min(1).max(255).optional(),
+      url: z.string().url().optional(),
+      events: z.array(z.string()).optional(),
+      isActive: z.number().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...data } = input;
+      return db.updateWebhook(id, ctx.user.id, data);
+    }),
+
+  // Delete a webhook
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await db.deleteWebhook(input.id, ctx.user.id);
+      return { success: true };
+    }),
+
+  // Test webhook (send a test event)
+  test: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const webhook = await db.getWebhookById(input.id, ctx.user.id);
+      if (!webhook) {
+        throw new Error("Webhook not found");
+      }
+
+      try {
+        const response = await fetch(webhook.url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Webhook-Secret": webhook.secret || "",
+            "X-Webhook-Event": "test",
+          },
+          body: JSON.stringify({
+            event: "test",
+            timestamp: new Date().toISOString(),
+            data: {
+              message: "This is a test webhook from Cogbase",
+              webhookId: webhook.id,
+            },
+          }),
+        });
+
+        await db.recordWebhookTrigger(webhook.id, response.ok);
+
+        return {
+          success: response.ok,
+          status: response.status,
+          message: response.ok ? "Webhook test successful" : "Webhook test failed",
+        };
+      } catch (error) {
+        await db.recordWebhookTrigger(webhook.id, false);
+        return {
+          success: false,
+          status: 0,
+          message: (error as Error).message,
+        };
+      }
+    }),
+});
+
+// ============ AGENT VERSION ROUTER ============
+const agentVersionRouter = router({
+  // Get version history for an agent
+  list: protectedProcedure
+    .input(z.object({ agentId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      // Verify user owns this agent
+      const agent = await db.getAgentById(input.agentId, ctx.user.id);
+      if (!agent) {
+        throw new Error("Agent not found");
+      }
+      return db.getAgentVersions(input.agentId);
+    }),
+
+  // Get a specific version
+  get: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      version: z.number(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const agent = await db.getAgentById(input.agentId, ctx.user.id);
+      if (!agent) {
+        throw new Error("Agent not found");
+      }
+      return db.getAgentVersion(input.agentId, input.version);
+    }),
+
+  // Revert agent to a previous version
+  revert: protectedProcedure
+    .input(z.object({
+      agentId: z.number(),
+      targetVersion: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const agent = await db.revertAgentToVersion(
+        input.agentId,
+        ctx.user.id,
+        input.targetVersion
+      );
+      if (!agent) {
+        throw new Error("Failed to revert agent");
+      }
+      return agent;
+    }),
+});
+
+// ============ VECTOR DB CONFIG ROUTER ============
+import { getVectorAdapter, getAvailableAdapters } from "./vectorAdapters";
+
+const vectorDbRouter = router({
+  // Get available vector database adapters
+  getAdapters: protectedProcedure.query(async () => {
+    return getAvailableAdapters();
+  }),
+
+  // Get current vector DB configuration
+  getConfig: protectedProcedure.query(async () => {
+    const currentAdapter = getVectorAdapter();
+    const adapters = getAvailableAdapters();
+    
+    return {
+      currentAdapter: currentAdapter.name,
+      adapters,
+      config: {
+        type: process.env.VECTOR_DB_TYPE || "mysql",
+        pineconeConfigured: Boolean(process.env.PINECONE_API_KEY),
+        weaviateConfigured: Boolean(process.env.WEAVIATE_URL),
+      },
+    };
+  }),
+
+  // Get vector storage stats
+  getStats: protectedProcedure.query(async ({ ctx }) => {
+    // Get all agents for this user
+    const agents = await db.getAgentsByUserId(ctx.user.id);
+    
+    let totalVectors = 0;
+    let totalDocuments = 0;
+    const agentStats: Array<{
+      agentId: number;
+      agentName: string;
+      vectorCount: number;
+      documentCount: number;
+    }> = [];
+
+    for (const agent of agents) {
+      const embeddings = await db.getVectorEmbeddingsByAgentId(agent.id);
+      const documents = await db.getTrainingDocumentsByAgentId(agent.id);
+      
+      totalVectors += embeddings.length;
+      totalDocuments += documents.length;
+      
+      agentStats.push({
+        agentId: agent.id,
+        agentName: agent.name,
+        vectorCount: embeddings.length,
+        documentCount: documents.length,
+      });
+    }
+
+    return {
+      totalVectors,
+      totalDocuments,
+      agentStats,
+      currentAdapter: getVectorAdapter().name,
+    };
+  }),
+});
+
+// ============ AUDIT LOG ROUTER ============
+const auditLogRouter = router({
+  // Get audit logs
+  list: protectedProcedure
+    .input(z.object({
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      action: z.string().optional(),
+      limit: z.number().min(1).max(100).optional().default(50),
+      offset: z.number().min(0).optional().default(0),
+    }).optional())
+    .query(async ({ ctx, input }) => {
+      const startDate = input?.startDate ? new Date(input.startDate) : undefined;
+      const endDate = input?.endDate ? new Date(input.endDate) : undefined;
+      return db.getAuditLogs(ctx.user.id, startDate, endDate, input?.action, input?.limit, input?.offset);
+    }),
+});
+
 // ============ MAIN ROUTER ============
 export const appRouter = router({
   system: systemRouter,
@@ -1060,6 +1543,11 @@ export const appRouter = router({
   rag: ragRouter,
   uiFlow: uiFlowRouter,
   feedback: feedbackRouter,
+  template: templateRouter,
+  webhook: webhookRouter,
+  agentVersion: agentVersionRouter,
+  vectorDb: vectorDbRouter,
+  auditLog: auditLogRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, sql, count, avg } from "drizzle-orm";
+import { eq, desc, and, gte, lte, sql, count, avg, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
   InsertUser, users, 
@@ -1054,7 +1054,9 @@ export async function getAuditLogs(
   userId?: number,
   startDate?: Date,
   endDate?: Date,
-  limit: number = 100
+  action?: string,
+  limit: number = 100,
+  offset: number = 0
 ): Promise<AuditLog[]> {
   const db = await getDb();
   if (!db) return [];
@@ -1070,11 +1072,15 @@ export async function getAuditLogs(
   if (endDate) {
     conditions.push(lte(auditLogs.createdAt, endDate));
   }
+  if (action) {
+    conditions.push(like(auditLogs.action, `${action}%`));
+  }
 
   const query = db.select()
     .from(auditLogs)
     .orderBy(desc(auditLogs.createdAt))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 
   if (conditions.length > 0) {
     return query.where(and(...conditions));
@@ -1546,4 +1552,296 @@ export async function deleteVectorEmbeddingsByAgentId(agentId: number): Promise<
   if (!db) return;
 
   await db.delete(vectorEmbeddings).where(eq(vectorEmbeddings.agentId, agentId));
+}
+
+// ============ FLOW TEMPLATE FUNCTIONS (Extended) ============
+
+export async function createFlowTemplate(
+  data: Omit<InsertFlowTemplate, "id" | "createdAt" | "updatedAt">
+): Promise<FlowTemplate> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(flowTemplates).values(data);
+  const insertedId = Number(result[0].insertId);
+  const [template] = await db.select().from(flowTemplates).where(eq(flowTemplates.id, insertedId));
+  return template;
+}
+
+export async function createFlowFromTemplate(
+  templateId: number,
+  userId: number,
+  name: string,
+  description?: string
+): Promise<UiFlow | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  // Get the template
+  const template = await getFlowTemplate(templateId);
+  if (!template || !template.flowData) return undefined;
+
+  // Increment usage count
+  await incrementFlowTemplateUsage(templateId);
+
+  // Create the new flow
+  const flow = await createUiFlow({
+    userId,
+    name,
+    description: description || template.description || undefined,
+    mermaidDiagram: template.flowData.mermaidDiagram,
+  });
+
+  // Create frames from template
+  for (const frame of template.flowData.frames) {
+    await createUiFrame({
+      flowId: flow.id,
+      frameId: frame.frameId,
+      name: frame.name,
+      type: frame.type,
+      positionX: frame.positionX,
+      positionY: frame.positionY,
+      width: frame.width,
+      height: frame.height,
+      config: frame.config || {},
+    });
+  }
+
+  // Create connections from template
+  for (const conn of template.flowData.connections) {
+    await createUiConnection({
+      flowId: flow.id,
+      connectionId: conn.connectionId,
+      sourceFrameId: conn.sourceFrameId,
+      targetFrameId: conn.targetFrameId,
+      label: conn.label,
+      type: conn.type,
+    });
+  }
+
+  return getUiFlowById(flow.id, userId);
+}
+
+export async function incrementFrameTemplateUsage(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.update(frameTemplates)
+    .set({ usageCount: sql`${frameTemplates.usageCount} + 1` })
+    .where(eq(frameTemplates.id, id));
+}
+
+export async function createFrameTemplate(
+  data: Omit<InsertFrameTemplate, "id" | "createdAt">
+): Promise<FrameTemplate> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(frameTemplates).values(data);
+  const insertedId = Number(result[0].insertId);
+  const [template] = await db.select().from(frameTemplates).where(eq(frameTemplates.id, insertedId));
+  return template;
+}
+
+// ============ WEBHOOK FUNCTIONS ============
+
+export async function getWebhooksByUserId(userId: number): Promise<Webhook[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(webhooks)
+    .where(eq(webhooks.userId, userId))
+    .orderBy(desc(webhooks.createdAt));
+}
+
+export async function getWebhookById(id: number, userId: number): Promise<Webhook | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const [webhook] = await db.select()
+    .from(webhooks)
+    .where(and(
+      eq(webhooks.id, id),
+      eq(webhooks.userId, userId)
+    ))
+    .limit(1);
+
+  return webhook;
+}
+
+export async function createWebhook(
+  data: Omit<InsertWebhook, "id" | "createdAt" | "updatedAt">
+): Promise<Webhook> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(webhooks).values(data);
+  const insertedId = Number(result[0].insertId);
+  const [webhook] = await db.select().from(webhooks).where(eq(webhooks.id, insertedId));
+  return webhook;
+}
+
+export async function updateWebhook(
+  id: number,
+  userId: number,
+  data: Partial<InsertWebhook>
+): Promise<Webhook | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  await db.update(webhooks)
+    .set(data)
+    .where(and(
+      eq(webhooks.id, id),
+      eq(webhooks.userId, userId)
+    ));
+
+  return getWebhookById(id, userId);
+}
+
+export async function deleteWebhook(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.delete(webhooks)
+    .where(and(
+      eq(webhooks.id, id),
+      eq(webhooks.userId, userId)
+    ));
+}
+
+export async function getWebhooksByEvent(agentId: number, event: string): Promise<Webhook[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Get all active webhooks for this agent that subscribe to this event
+  const allWebhooks = await db.select()
+    .from(webhooks)
+    .where(and(
+      eq(webhooks.agentId, agentId),
+      eq(webhooks.isActive, 1)
+    ));
+
+  // Filter by event type
+  return allWebhooks.filter(w => 
+    w.events && Array.isArray(w.events) && w.events.includes(event)
+  );
+}
+
+export async function recordWebhookTrigger(id: number, success: boolean): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  if (success) {
+    await db.update(webhooks)
+      .set({ 
+        lastTriggeredAt: new Date(),
+        failureCount: 0
+      })
+      .where(eq(webhooks.id, id));
+  } else {
+    await db.update(webhooks)
+      .set({ 
+        lastTriggeredAt: new Date(),
+        failureCount: sql`${webhooks.failureCount} + 1`
+      })
+      .where(eq(webhooks.id, id));
+  }
+}
+
+// ============ AGENT VERSION FUNCTIONS (Extended) ============
+
+export async function revertAgentToVersion(
+  agentId: number,
+  userId: number,
+  targetVersion: number
+): Promise<Agent | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  // Get the target version
+  const version = await getAgentVersion(agentId, targetVersion);
+  if (!version) return undefined;
+
+  // Create a new version before reverting (to preserve history)
+  const currentAgent = await getAgentById(agentId, userId);
+  if (currentAgent) {
+    const latestVersion = await getLatestAgentVersion(agentId);
+    await createAgentVersion({
+      agentId,
+      userId,
+      version: latestVersion + 1,
+      name: currentAgent.name,
+      description: currentAgent.description,
+      systemPrompt: currentAgent.systemPrompt,
+      model: currentAgent.model,
+      conversationStarters: currentAgent.conversationStarters,
+      constraints: currentAgent.constraints,
+      temperature: currentAgent.temperature,
+      maxTokens: currentAgent.maxTokens,
+      changeDescription: `Reverted to version ${targetVersion}`,
+    });
+  }
+
+  // Update the agent with the version data
+  await db.update(agents)
+    .set({
+      name: version.name,
+      description: version.description,
+      systemPrompt: version.systemPrompt,
+      model: version.model,
+      conversationStarters: version.conversationStarters,
+      constraints: version.constraints,
+      temperature: version.temperature,
+      maxTokens: version.maxTokens,
+    })
+    .where(and(
+      eq(agents.id, agentId),
+      eq(agents.userId, userId)
+    ));
+
+  return getAgentById(agentId, userId);
+}
+
+// ============ FLOW ATTACHMENT TO AGENT ============
+
+export async function attachFlowToAgent(
+  agentId: number,
+  userId: number,
+  flowId: number | null
+): Promise<Agent | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  // For now, we store the attached flow ID in the agent's metadata
+  // This allows agents to have a UI flow associated with them
+  const agent = await getAgentById(agentId, userId);
+  if (!agent) return undefined;
+
+  // We'll store attachedFlowId in a way that works with the schema
+  // Using constraints array with a special marker
+  const constraints = agent.constraints || [];
+  const filteredConstraints = constraints.filter(c => !c.startsWith('__attachedFlowId:'));
+  
+  if (flowId !== null) {
+    filteredConstraints.push(`__attachedFlowId:${flowId}`);
+  }
+
+  await db.update(agents)
+    .set({ constraints: filteredConstraints })
+    .where(and(
+      eq(agents.id, agentId),
+      eq(agents.userId, userId)
+    ));
+
+  return getAgentById(agentId, userId);
+}
+
+export function getAttachedFlowId(agent: Agent): number | null {
+  if (!agent.constraints) return null;
+  const marker = agent.constraints.find(c => c.startsWith('__attachedFlowId:'));
+  if (!marker) return null;
+  const flowId = parseInt(marker.replace('__attachedFlowId:', ''), 10);
+  return isNaN(flowId) ? null : flowId;
 }

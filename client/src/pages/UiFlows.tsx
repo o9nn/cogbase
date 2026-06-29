@@ -12,8 +12,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { trpc } from "@/lib/trpc";
-import { Plus, MoreVertical, Eye, Trash2, Edit } from "lucide-react";
+import { Plus, MoreVertical, Eye, Trash2, Edit, Layout, Sparkles, TrendingUp } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
@@ -39,8 +42,11 @@ export default function UiFlows() {
   const [, setLocation] = useLocation();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [deleteFlowId, setDeleteFlowId] = useState<number | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<number | null>(null);
+  const [createMode, setCreateMode] = useState<"blank" | "template">("blank");
 
   const { data: flows, isLoading, refetch } = trpc.uiFlow.list.useQuery();
+  const { data: flowTemplates } = trpc.template.listFlowTemplates.useQuery({});
   const utils = trpc.useUtils();
 
   const createMutation = trpc.uiFlow.create.useMutation({
@@ -52,6 +58,19 @@ export default function UiFlows() {
     },
     onError: (error) => {
       toast.error(error.message || "Failed to create UI Flow");
+    },
+  });
+
+  const createFromTemplateMutation = trpc.template.createFlowFromTemplate.useMutation({
+    onSuccess: (data) => {
+      toast.success("UI Flow created from template");
+      setIsCreateOpen(false);
+      setSelectedTemplate(null);
+      utils.uiFlow.list.invalidate();
+      setLocation(`/ui-flows/${data.id}`);
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to create flow from template");
     },
   });
 
@@ -69,11 +88,26 @@ export default function UiFlows() {
   const handleCreate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    const name = formData.get("name") as string;
+    const description = formData.get("description") as string;
 
-    createMutation.mutate({
-      name: formData.get("name") as string,
-      description: formData.get("description") as string,
-    });
+    if (createMode === "template" && selectedTemplate) {
+      createFromTemplateMutation.mutate({
+        templateId: selectedTemplate,
+        name,
+        description,
+      });
+    } else {
+      createMutation.mutate({ name, description });
+    }
+  };
+
+  const categoryColors: Record<string, string> = {
+    customer_support: "bg-blue-500/10 text-blue-500",
+    onboarding: "bg-green-500/10 text-green-500",
+    faq: "bg-yellow-500/10 text-yellow-500",
+    sales: "bg-purple-500/10 text-purple-500",
+    booking: "bg-pink-500/10 text-pink-500",
   };
 
   return (
@@ -86,44 +120,158 @@ export default function UiFlows() {
             Design and visualize conversational flows with canvas-based UI builder
           </p>
         </div>
-        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <Dialog open={isCreateOpen} onOpenChange={(open) => {
+          setIsCreateOpen(open);
+          if (!open) {
+            setSelectedTemplate(null);
+            setCreateMode("blank");
+          }
+        }}>
           <DialogTrigger asChild>
             <Button className="gradient-primary">
               <Plus className="w-4 h-4 mr-2" />
               New Flow
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-3xl">
             <form onSubmit={handleCreate}>
               <DialogHeader>
                 <DialogTitle>Create New UI Flow</DialogTitle>
                 <DialogDescription>
-                  Design conversational flows and UI screens with an interactive canvas
+                  Start from scratch or use a pre-built template
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="name">Name</Label>
-                  <Input
-                    id="name"
-                    name="name"
-                    placeholder="Customer Support Flow"
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    name="description"
-                    placeholder="A flow for handling customer support inquiries..."
-                    rows={3}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="submit" disabled={createMutation.isPending}>
-                  {createMutation.isPending ? "Creating..." : "Create Flow"}
+              
+              <Tabs value={createMode} onValueChange={(v) => setCreateMode(v as "blank" | "template")} className="mt-4">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="blank" className="flex items-center gap-2">
+                    <Layout className="w-4 h-4" />
+                    Blank Flow
+                  </TabsTrigger>
+                  <TabsTrigger value="template" className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" />
+                    From Template
+                  </TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="blank" className="mt-4">
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="name">Name</Label>
+                      <Input
+                        id="name"
+                        name="name"
+                        placeholder="Customer Support Flow"
+                        required
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="description">Description</Label>
+                      <Textarea
+                        id="description"
+                        name="description"
+                        placeholder="A flow for handling customer support inquiries..."
+                        rows={3}
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="template" className="mt-4">
+                  <div className="grid gap-4">
+                    {/* Template Selection */}
+                    <div className="grid gap-2">
+                      <Label>Select a Template</Label>
+                      <ScrollArea className="h-[300px] rounded-md border p-4">
+                        <div className="grid gap-3">
+                          {flowTemplates?.map((template) => (
+                            <Card
+                              key={template.id}
+                              className={`cursor-pointer transition-all ${
+                                selectedTemplate === template.id
+                                  ? "ring-2 ring-primary border-primary"
+                                  : "hover:border-primary/50"
+                              }`}
+                              onClick={() => setSelectedTemplate(template.id)}
+                            >
+                              <CardHeader className="p-4">
+                                <div className="flex items-start justify-between">
+                                  <div>
+                                    <CardTitle className="text-base">{template.name}</CardTitle>
+                                    <CardDescription className="text-sm mt-1">
+                                      {template.description}
+                                    </CardDescription>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {template.category && (
+                                      <Badge 
+                                        variant="secondary"
+                                        className={categoryColors[template.category] || ""}
+                                      >
+                                        {template.category.replace("_", " ")}
+                                      </Badge>
+                                    )}
+                                    {template.usageCount > 0 && (
+                                      <Badge variant="outline" className="flex items-center gap-1">
+                                        <TrendingUp className="w-3 h-3" />
+                                        {template.usageCount}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              </CardHeader>
+                            </Card>
+                          ))}
+                          {(!flowTemplates || flowTemplates.length === 0) && (
+                            <p className="text-center text-muted-foreground py-8">
+                              No templates available yet
+                            </p>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                    
+                    {/* Name Override */}
+                    <div className="grid gap-2">
+                      <Label htmlFor="template-name">Flow Name</Label>
+                      <Input
+                        id="template-name"
+                        name="name"
+                        placeholder={selectedTemplate 
+                          ? flowTemplates?.find(t => t.id === selectedTemplate)?.name 
+                          : "My Flow"
+                        }
+                        required
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="template-description">Description (optional)</Label>
+                      <Textarea
+                        id="template-description"
+                        name="description"
+                        placeholder="Customize the description..."
+                        rows={2}
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+              </Tabs>
+              
+              <DialogFooter className="mt-6">
+                <Button 
+                  type="submit" 
+                  disabled={
+                    createMutation.isPending || 
+                    createFromTemplateMutation.isPending ||
+                    (createMode === "template" && !selectedTemplate)
+                  }
+                >
+                  {createMutation.isPending || createFromTemplateMutation.isPending 
+                    ? "Creating..." 
+                    : createMode === "template" 
+                      ? "Create from Template" 
+                      : "Create Flow"
+                  }
                 </Button>
               </DialogFooter>
             </form>
