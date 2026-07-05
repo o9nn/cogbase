@@ -211,7 +211,7 @@ export default function UiFlows() {
                                         {template.category.replace("_", " ")}
                                       </Badge>
                                     )}
-                                    {template.usageCount > 0 && (
+                                    {(template.usageCount ?? 0) > 0 && (
                                       <Badge variant="outline" className="flex items-center gap-1">
                                         <TrendingUp className="w-3 h-3" />
                                         {template.usageCount}

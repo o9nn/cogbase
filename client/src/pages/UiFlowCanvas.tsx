@@ -607,8 +607,8 @@ export default function UiFlowCanvas() {
                                 id: template.id,
                                 name: template.name,
                                 type: template.type,
-                                category: template.category,
-                                defaultConfig: template.defaultConfig ? JSON.parse(template.defaultConfig) : {},
+                                category: template.category ?? "",
+                                defaultConfig: template.defaultConfig ?? {},
                               })}
                             >
                               <Plus className="w-3 h-3 mr-2" />

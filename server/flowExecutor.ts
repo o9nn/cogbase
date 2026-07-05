@@ -33,8 +33,8 @@ interface Frame {
   id: number;
   frameId: string;
   name: string;
-  type: string;
-  config: string | null;
+  type: string | null;
+  config: Record<string, unknown> | null;
   positionX: number | null;
   positionY: number | null;
 }
@@ -45,7 +45,7 @@ interface Connection {
   sourceFrameId: string;
   targetFrameId: string;
   label: string | null;
-  condition: string | null;
+  metadata: Record<string, unknown> | null;
 }
 
 // Store flow states in memory (in production, this would be in Redis or DB)
@@ -148,8 +148,8 @@ export async function processFlowInput(
   }
 
   // Store user input in variables
-  const frameConfig = currentFrame.config ? JSON.parse(currentFrame.config) : {};
-  if (frameConfig.variableName) {
+  const frameConfig = currentFrame.config ?? {};
+  if (typeof frameConfig.variableName === "string" && frameConfig.variableName) {
     state.variables[frameConfig.variableName] = userInput;
   }
 
@@ -178,10 +178,11 @@ export async function processFlowInput(
 
   for (const conn of connections) {
     // Check if the connection has a condition that matches the input
-    if (conn.condition) {
+    const condition = conn.metadata?.condition;
+    if (condition) {
       try {
-        const condition = JSON.parse(conn.condition);
-        if (evaluateCondition(condition, userInput, state.variables)) {
+        const parsedCondition = typeof condition === "string" ? JSON.parse(condition) : condition;
+        if (evaluateCondition(parsedCondition, userInput, state.variables)) {
           nextConnection = conn;
           break;
         }
@@ -202,7 +203,7 @@ export async function processFlowInput(
 
   // If no specific match, use the first connection without conditions (default path)
   if (!nextConnection) {
-    nextConnection = connections.find((c) => !c.condition && !c.label) || connections[0];
+    nextConnection = connections.find((c) => !c.metadata?.condition && !c.label) || connections[0];
   }
 
   if (!nextConnection) {
@@ -255,8 +256,9 @@ async function frameToResponse(
   flowId: number,
   variables?: Record<string, unknown>
 ): Promise<FrameResponse> {
-  const config = frame.config ? JSON.parse(frame.config) : {};
-  let content = config.content || config.message || frame.name;
+  const config = frame.config ?? {};
+  const rawContent = config.content || config.message || frame.name;
+  let content = typeof rawContent === "string" ? rawContent : String(rawContent ?? "");
 
   // Interpolate variables in content
   if (variables) {
@@ -277,13 +279,13 @@ async function frameToResponse(
     ) : [];
 
   const response: FrameResponse = {
-    type: frame.type,
+    type: frame.type ?? "message",
     content,
     config,
   };
 
   // Add options based on frame type and connections
-  switch (frame.type) {
+  switch (frame.type ?? "message") {
     case "button":
     case "quick_reply":
     case "choice":
@@ -310,8 +312,8 @@ async function frameToResponse(
     case "text_input":
     case "email_input":
     case "phone_input":
-      response.inputType = config.inputType || "text";
-      response.placeholder = config.placeholder || "Type your response...";
+      response.inputType = typeof config.inputType === "string" ? config.inputType : "text";
+      response.placeholder = typeof config.placeholder === "string" ? config.placeholder : "Type your response...";
       break;
 
     case "message":
@@ -327,7 +329,7 @@ async function frameToResponse(
   }
 
   // If there's exactly one connection with no label/condition, set it as nextFrameId for auto-advance
-  if (connections.length === 1 && !connections[0].label && !connections[0].condition) {
+  if (connections.length === 1 && !connections[0].label && !connections[0].metadata?.condition) {
     response.nextFrameId = connections[0].targetFrameId;
   }
 
@@ -405,7 +407,7 @@ export function getFlowStats(): {
   flowsInUse: Set<number>;
 } {
   const flowsInUse = new Set<number>();
-  for (const state of flowStates.values()) {
+  for (const state of Array.from(flowStates.values())) {
     flowsInUse.add(state.flowId);
   }
 
@@ -422,7 +424,7 @@ export function cleanupStaleFlows(): number {
   const staleThreshold = Date.now() - 24 * 60 * 60 * 1000; // 24 hours
   let cleaned = 0;
 
-  for (const [sessionId, state] of flowStates.entries()) {
+  for (const [sessionId, state] of Array.from(flowStates.entries())) {
     if (state.lastUpdatedAt.getTime() < staleThreshold) {
       flowStates.delete(sessionId);
       cleaned++;

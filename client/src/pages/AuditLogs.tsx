@@ -83,7 +83,7 @@ export default function AuditLogs() {
     const searchLower = search.toLowerCase();
     return (
       log.action.toLowerCase().includes(searchLower) ||
-      log.details?.toLowerCase().includes(searchLower) ||
+      (log.details ? JSON.stringify(log.details).toLowerCase().includes(searchLower) : false) ||
       log.ipAddress?.toLowerCase().includes(searchLower)
     );
   });
@@ -97,9 +97,9 @@ export default function AuditLogs() {
         [
           new Date(log.createdAt).toISOString(),
           log.action,
-          log.resourceType || "",
+          log.resource || "",
           log.resourceId?.toString() || "",
-          `"${(log.details || "").replace(/"/g, '""')}"`,
+          `"${(log.details ? JSON.stringify(log.details) : "").replace(/"/g, '""')}"`,
           log.ipAddress || "",
         ].join(",")
       ),
@@ -210,9 +210,9 @@ export default function AuditLogs() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        {log.resourceType && (
+                        {log.resource && (
                           <span className="text-sm">
-                            {log.resourceType}
+                            {log.resource}
                             {log.resourceId && (
                               <span className="text-muted-foreground">
                                 #{log.resourceId}
@@ -222,7 +222,7 @@ export default function AuditLogs() {
                         )}
                       </TableCell>
                       <TableCell className="max-w-xs truncate">
-                        {log.details || "-"}
+                        {log.details ? JSON.stringify(log.details) : "-"}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground font-mono">
                         {log.ipAddress || "-"}
