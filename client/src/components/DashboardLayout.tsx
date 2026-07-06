@@ -37,7 +37,8 @@ import {
   Layers,
   Webhook,
   Database,
-  FileText
+  FileText,
+  Activity
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "wouter";
@@ -52,6 +53,7 @@ const mainMenuItems = [
   { icon: Layers, label: "UI Flows", path: "/ui-flows" },
   { icon: Webhook, label: "Webhooks", path: "/webhooks" },
   { icon: Database, label: "Vector DB", path: "/vector-db" },
+  { icon: Activity, label: "API Usage", path: "/api-usage" },
   { icon: FileText, label: "Audit Logs", path: "/audit-logs" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];

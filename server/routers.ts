@@ -48,6 +48,17 @@ const agentRouter = router({
         status: "active",
         lastTrainedAt: new Date(),
       });
+
+      // Audit log
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        action: "agent.create",
+        resource: "agent",
+        resourceId: agent.id,
+        details: { name: input.name, model: input.model },
+        status: "success",
+      });
+
       return agent;
     }),
 
@@ -66,13 +77,36 @@ const agentRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      return db.updateAgent(id, ctx.user.id, data);
+      const agent = await db.updateAgent(id, ctx.user.id, data);
+
+      // Audit log
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        action: "agent.update",
+        resource: "agent",
+        resourceId: id,
+        details: { changes: Object.keys(data) },
+        status: "success",
+      });
+
+      return agent;
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
       await db.deleteAgent(input.id, ctx.user.id);
+
+      // Audit log
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        action: "agent.delete",
+        resource: "agent",
+        resourceId: input.id,
+        details: {},
+        status: "success",
+      });
+
       return { success: true };
     }),
 
@@ -694,6 +728,16 @@ const ragRouter = router({
         chunkCount: 0,
       });
 
+      // Audit log
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        action: "document.upload",
+        resource: "document",
+        resourceId: document.id,
+        details: { fileName: input.fileName, fileType: input.fileType, agentId: input.agentId },
+        status: "success",
+      });
+
       // Process document immediately (in production, this would be queued)
       try {
         await processDocumentForRAG(document.id, input.agentId, input.content);
@@ -714,6 +758,17 @@ const ragRouter = router({
       await db.deleteVectorEmbeddingsByDocumentId(input.documentId);
       // Delete document
       await db.deleteTrainingDocument(input.documentId, ctx.user.id);
+
+      // Audit log
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        action: "document.delete",
+        resource: "document",
+        resourceId: input.documentId,
+        details: {},
+        status: "success",
+      });
+
       return { success: true };
     }),
 
@@ -984,13 +1039,25 @@ const uiFlowRouter = router({
       mermaidDiagram: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      return db.createUiFlow({
+      const flow = await db.createUiFlow({
         userId: ctx.user.id,
         name: input.name,
         description: input.description,
         agentId: input.agentId,
         mermaidDiagram: input.mermaidDiagram,
       });
+
+      // Audit log
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        action: "flow.create",
+        resource: "flow",
+        resourceId: flow.id,
+        details: { name: input.name },
+        status: "success",
+      });
+
+      return flow;
     }),
 
   // Update a flow
@@ -1003,7 +1070,19 @@ const uiFlowRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      return db.updateUiFlow(id, ctx.user.id, data);
+      const flow = await db.updateUiFlow(id, ctx.user.id, data);
+
+      // Audit log
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        action: "flow.update",
+        resource: "flow",
+        resourceId: id,
+        details: { changes: Object.keys(data) },
+        status: "success",
+      });
+
+      return flow;
     }),
 
   // Delete a flow
@@ -1011,6 +1090,17 @@ const uiFlowRouter = router({
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
       await db.deleteUiFlow(input.id, ctx.user.id);
+
+      // Audit log
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        action: "flow.delete",
+        resource: "flow",
+        resourceId: input.id,
+        details: {},
+        status: "success",
+      });
+
       return { success: true };
     }),
 
@@ -1523,6 +1613,49 @@ const auditLogRouter = router({
     }),
 });
 
+// ============ API USAGE ROUTER ============
+const apiUsageRouter = router({
+  // Get API usage statistics
+  getUsage: protectedProcedure.query(async ({ ctx }) => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Get today's stats
+    const todayStats = await db.getApiUsageStats(ctx.user.id, today);
+    
+    // Get yesterday's stats for comparison
+    const yesterdayStats = await db.getApiUsageStats(ctx.user.id, yesterday, today);
+    
+    // Get this billing period stats (30 days)
+    const periodStats = await db.getApiUsageStats(ctx.user.id, thirtyDaysAgo);
+
+    // Calculate change percentage
+    const callsChangePercent = yesterdayStats.totalRequests > 0
+      ? Math.round(((todayStats.totalRequests - yesterdayStats.totalRequests) / yesterdayStats.totalRequests) * 100)
+      : todayStats.totalRequests > 0 ? 100 : 0;
+
+    // Estimate cost using simplified pricing for display purposes only.
+    // NOTE: This is a rough estimate using GPT-3.5-turbo pricing (~$0.002 per 1K tokens).
+    // Actual costs vary significantly by model (GPT-4o, Claude, etc.) and should be
+    // configured based on actual model pricing in production billing systems.
+    const estimatedCost = (periodStats.totalTokens / 1000) * 0.002;
+
+    return {
+      totalCallsToday: todayStats.totalRequests,
+      callsChangePercent,
+      totalTokens: periodStats.totalTokens,
+      avgResponseTime: Math.round(periodStats.avgResponseTime),
+      estimatedCost,
+      dailyUsage: [], // In production, this would come from aggregated data
+      endpointStats: [], // In production, this would come from aggregated data
+    };
+  }),
+});
+
 // ============ MAIN ROUTER ============
 export const appRouter = router({
   system: systemRouter,
@@ -1548,6 +1681,7 @@ export const appRouter = router({
   agentVersion: agentVersionRouter,
   vectorDb: vectorDbRouter,
   auditLog: auditLogRouter,
+  apiUsage: apiUsageRouter,
 });
 
 export type AppRouter = typeof appRouter;
