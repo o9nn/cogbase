@@ -627,3 +627,19 @@ export async function deleteUiConnection(id: number, flowId: number) {
     connection => !(connection.id === id && connection.flowId === flowId)
   );
 }
+
+// Audit log mock - just returns a mock object, doesn't need to store
+export async function createAuditLog(data: {
+  userId?: number;
+  action: string;
+  resource: string;
+  resourceId?: number;
+  details?: Record<string, unknown>;
+  status?: string;
+}) {
+  return {
+    id: 1,
+    ...data,
+    createdAt: new Date(),
+  };
+}
