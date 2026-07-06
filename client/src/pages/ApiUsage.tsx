@@ -138,31 +138,38 @@ export default function ApiUsage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Credits Used</p>
-                      <p className="text-sm text-muted-foreground">
-                        {settings.creditsUsed} of {settings.creditsTotal} credits
-                      </p>
-                    </div>
-                    <Badge
-                      variant={
-                        settings.creditsTotal > 0 && settings.creditsUsed / settings.creditsTotal > 0.9
-                          ? "destructive"
-                          : settings.creditsTotal > 0 && settings.creditsUsed / settings.creditsTotal > 0.7
-                          ? "secondary"
-                          : "default"
-                      }
-                    >
-                      {settings.creditsTotal > 0
-                        ? ((settings.creditsUsed / settings.creditsTotal) * 100).toFixed(0)
-                        : 0}%
-                    </Badge>
-                  </div>
-                  <Progress
-                    value={settings.creditsTotal > 0 ? (settings.creditsUsed / settings.creditsTotal) * 100 : 0}
-                    className="h-2"
-                  />
+                  {(() => {
+                    const usageRatio = settings.creditsTotal > 0
+                      ? settings.creditsUsed / settings.creditsTotal
+                      : 0;
+                    return (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium">Credits Used</p>
+                            <p className="text-sm text-muted-foreground">
+                              {settings.creditsUsed} of {settings.creditsTotal} credits
+                            </p>
+                          </div>
+                          <Badge
+                            variant={
+                              usageRatio > 0.9
+                                ? "destructive"
+                                : usageRatio > 0.7
+                                ? "secondary"
+                                : "default"
+                            }
+                          >
+                            {(usageRatio * 100).toFixed(0)}%
+                          </Badge>
+                        </div>
+                        <Progress
+                          value={usageRatio * 100}
+                          className="h-2"
+                        />
+                      </>
+                    );
+                  })()}
                   {settings.creditsResetAt && (
                     <p className="text-xs text-muted-foreground">
                       Resets on {new Date(settings.creditsResetAt).toLocaleDateString()}
@@ -276,28 +283,29 @@ export default function ApiUsage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {endpointStats.map((endpoint, index) => (
-                      <div key={index} className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="font-mono text-xs">
-                              {endpoint.method}
-                            </Badge>
-                            <span className="font-mono text-sm">{endpoint.path}</span>
+                    {(() => {
+                      const maxCalls = Math.max(...endpointStats.map(e => e.calls), 1);
+                      return endpointStats.map((endpoint, index) => (
+                        <div key={index} className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="font-mono text-xs">
+                                {endpoint.method}
+                              </Badge>
+                              <span className="font-mono text-sm">{endpoint.path}</span>
+                            </div>
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                              <span>{endpoint.calls} calls</span>
+                              <span>{endpoint.avgTime}ms avg</span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>{endpoint.calls} calls</span>
-                            <span>{endpoint.avgTime}ms avg</span>
-                          </div>
+                          <Progress
+                            value={(endpoint.calls / maxCalls) * 100}
+                            className="h-1"
+                          />
                         </div>
-                        <Progress
-                          value={endpointStats.length > 0 && endpointStats[0].calls > 0
-                            ? (endpoint.calls / endpointStats[0].calls) * 100
-                            : 0}
-                          className="h-1"
-                        />
-                      </div>
-                    ))}
+                      ));
+                    })()}
                   </div>
                 </CardContent>
               </Card>
